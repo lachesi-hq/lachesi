@@ -1,0 +1,165 @@
+/* Theming overrides for react-diff-view, mapped onto Lachesi design tokens. */
+
+.diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.diff-gutter {
+  min-width: 2.5rem;
+  padding: 0 0.6rem;
+  text-align: right;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  user-select: none;
+}
+
+.diff-gutter:hover {
+  color: var(--foreground);
+}
+
+.diff-code {
+  padding: 0 0.6rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-line {
+  border: 0;
+}
+
+.diff-gutter-insert {
+  background: var(--diff-add-gutter);
+}
+
+.diff-code-insert {
+  background: var(--diff-add-bg);
+}
+
+.diff-gutter-delete {
+  background: var(--diff-del-gutter);
+}
+
+.diff-code-delete {
+  background: var(--diff-del-bg);
+}
+
+/* Word-level intra-line highlights */
+.diff-code-insert .diff-code-edit {
+  background: var(--diff-word-add);
+  border-radius: 0.2em;
+}
+
+.diff-code-delete .diff-code-edit {
+  background: var(--diff-word-del);
+  border-radius: 0.2em;
+}
+
+.diff-hunk-header,
+.diff-decoration {
+  background: var(--diff-hunk-bg);
+  color: var(--muted-foreground);
+}
+
+.diff-hunk-header-content {
+  padding: 0.25rem 0.6rem;
+}
+
+.diff-decoration-content {
+  padding: 0.25rem 0.6rem;
+}
+
+/* The comment-widget row injected via the `widgets` prop */
+.diff-widget-content {
+  padding: 0;
+}
+
+/* ----------------------------------------------------------------------------
+   Syntax highlighting (refractor / Prism tokens) — GitHub-flavored.
+   Light theme defaults; dark overrides under [data-theme="dark"].
+---------------------------------------------------------------------------- */
+.diff .token.comment,
+.diff .token.prolog,
+.diff .token.doctype,
+.diff .token.cdata {
+  color: #6e7781;
+  font-style: italic;
+}
+.diff .token.punctuation {
+  color: #24292f;
+}
+.diff .token.keyword,
+.diff .token.operator,
+.diff .token.tag,
+.diff .token.deleted {
+  color: #cf222e;
+}
+.diff .token.string,
+.diff .token.char,
+.diff .token.attr-value,
+.diff .token.inserted {
+  color: #0a3069;
+}
+.diff .token.function,
+.diff .token.class-name {
+  color: #8250df;
+}
+.diff .token.number,
+.diff .token.boolean,
+.diff .token.constant,
+.diff .token.symbol,
+.diff .token.property,
+.diff .token.attr-name,
+.diff .token.variable {
+  color: #0550ae;
+}
+.diff .token.selector,
+.diff .token.builtin,
+.diff .token.regex {
+  color: #116329;
+}
+
+[data-theme="dark"] .diff .token.comment,
+[data-theme="dark"] .diff .token.prolog,
+[data-theme="dark"] .diff .token.doctype,
+[data-theme="dark"] .diff .token.cdata {
+  color: #8b949e;
+}
+[data-theme="dark"] .diff .token.punctuation {
+  color: #c9d1d9;
+}
+[data-theme="dark"] .diff .token.keyword,
+[data-theme="dark"] .diff .token.operator,
+[data-theme="dark"] .diff .token.tag,
+[data-theme="dark"] .diff .token.deleted {
+  color: #ff7b72;
+}
+[data-theme="dark"] .diff .token.string,
+[data-theme="dark"] .diff .token.char,
+[data-theme="dark"] .diff .token.attr-value,
+[data-theme="dark"] .diff .token.inserted {
+  color: #a5d6ff;
+}
+[data-theme="dark"] .diff .token.function,
+[data-theme="dark"] .diff .token.class-name {
+  color: #d2a8ff;
+}
+[data-theme="dark"] .diff .token.number,
+[data-theme="dark"] .diff .token.boolean,
+[data-theme="dark"] .diff .token.constant,
+[data-theme="dark"] .diff .token.symbol,
+[data-theme="dark"] .diff .token.property,
+[data-theme="dark"] .diff .token.attr-name,
+[data-theme="dark"] .diff .token.variable {
+  color: #79c0ff;
+}
+[data-theme="dark"] .diff .token.selector,
+[data-theme="dark"] .diff .token.builtin,
+[data-theme="dark"] .diff .token.regex {
+  color: #7ee787;
+}

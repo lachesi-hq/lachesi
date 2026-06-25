@@ -1,0 +1,333 @@
+# Spec 0006 - v0.1 CLI and Headless Review Mode
+
+- Status: Draft
+- Date: 2026-06-23
+- GitHub issue: #30
+
+## Context
+
+Lachesi is currently Tauri-first:
+
+- the executable entrypoint is the desktop app
+- Bitbucket access, review execution, review persistence, fix sessions, and
+  publication primitives are exposed as Tauri commands
+- local repo resolution already exists in Rust
+- normalized `ReviewRun`, `Finding`, and `EvidenceArtifact` contracts already
+  exist
+- repo-owned config, policy sources, and local evidence pipeline specs now
+  define shared behavior that should not be desktop-only
+
+CLI mode is therefore not just a thin wrapper around UI commands. v0.1 requires
+a reusable review core that both the Tauri adapter and the future CLI adapter can
+call.
+
+## Goals
+
+- define the split between reusable review core, Tauri desktop adapter, and CLI
+  adapter
+- define a first CLI command surface focused on review execution
+- reuse normalized review output rather than inventing CLI-only result shapes
+- support local interactive and CI usage
+- define markdown, JSON, and exit-code behavior
+- document authentication and repository assumptions for Bitbucket-linked flows
+
+## Non-goals
+
+- full desktop parity in the first CLI cut
+- interactive chat threads
+- staging or publishing Bitbucket draft comments from CLI
+- fix/commit/push automation from CLI
+- hosted orchestration or enterprise reporting
+
+## Architecture
+
+### Reusable Review Core
+
+The review core should be a Rust module or crate with no Tauri dependency.
+
+It owns:
+
+- loading effective config
+- resolving local repo context
+- collecting Bitbucket PR metadata and diff payloads through provider clients
+- collecting Jira/Notion/resource context when configured
+- running local evidence analyzers
+- building the AI review prompt
+- invoking the model provider
+- materializing `ReviewRun`, `Finding`, and `EvidenceArtifact`
+- persisting review store updates through an injected storage interface
+
+It should expose an API shaped like:
+
+```rust
+pub struct ReviewRequest {
+    pub workspace: String,
+    pub repo: String,
+    pub pr_id: u32,
+    pub repo_path: Option<PathBuf>,
+    pub output_format: ReviewOutputFormat,
+    pub evidence_only: bool,
+    pub fail_on_findings: bool,
+    pub session_instruction: Option<String>,
+}
+
+pub struct ReviewExecutionResult {
+    pub run: ReviewRun,
+    pub markdown: String,
+    pub warnings: Vec<String>,
+    pub analyzer_failures: Vec<String>,
+}
+```
+
+The exact Rust type names can change, but the boundary matters: desktop and CLI
+should call the same review orchestration code.
+
+### Tauri Desktop Adapter
+
+The Tauri adapter owns:
+
+- command registration in `src-tauri/src/lib.rs`
+- UI-oriented run state and live logs
+- cancellation buttons and progress polling
+- chat threads and replies
+- draft-comment staging and publication
+- fix sessions, commit, and push workflows
+
+Desktop can keep richer state than CLI, but review results should still flow
+through the shared `ReviewRun` contract.
+
+### CLI Adapter
+
+The CLI adapter owns:
+
+- argument parsing
+- terminal output
+- process exit codes
+- CI-friendly non-interactive behavior
+- reading stdin only where explicitly supported
+
+The CLI should not import or initialize a Tauri runtime.
+
+## Command Surface
+
+### `lachesi review`
+
+Primary v0.1 command:
+
+```sh
+lachesi review --workspace example-workspace --repo frontend-app --pr 1731
+```
+
+Options:
+
+```sh
+lachesi review \
+  --workspace <workspace> \
+  --repo <repo> \
+  --pr <id> \
+  [--repo-path <path>] \
+  [--config <path>] \
+  [--local-config <path>] \
+  [--format markdown|json|jsonl] \
+  [--output <path>] \
+  [--evidence-only] \
+  [--fail-on-findings] \
+  [--min-severity info|low|medium|high|critical] \
+  [--session-instruction <text>] \
+  [--no-jira] \
+  [--no-notion]
+```
+
+Defaults:
+
+- `--format markdown`
+- repo path comes from app config, explicit `--repo-path`, or discovery
+- `.lachesi.yaml` is loaded from repo root when present
+- local `.lachesi.local.yaml` is loaded when present
+- manual publication is not attempted
+- findings do not fail the process unless `--fail-on-findings` is set
+
+### `lachesi config validate`
+
+Validates effective config without running review:
+
+```sh
+lachesi config validate --repo-path .
+```
+
+Exit behavior follows the config exit-code model below.
+
+### `lachesi evidence`
+
+Optional v0.1 command if implemented early:
+
+```sh
+lachesi evidence --workspace example-workspace --repo frontend-app --pr 1731 --format json
+```
+
+This runs configured analyzers and emits evidence without invoking the model.
+Equivalent behavior is also available through `lachesi review --evidence-only`.
+
+## Output Formats
+
+### Markdown
+
+Human-readable output for local terminal usage.
+
+It should include:
+
+- review title and PR identifier
+- summary
+- findings grouped by severity
+- file/line anchors when present
+- evidence and analyzer warnings
+- footer with run id and schema version
+
+### JSON
+
+Machine-readable output for CI and downstream tools.
+
+The top-level JSON object should be:
+
+```json
+{
+  "schemaVersion": "v0.1",
+  "status": "succeeded",
+  "exitCode": 1,
+  "warnings": [],
+  "analyzerFailures": [],
+  "reviewRun": {
+    "id": "run-1",
+    "schemaVersion": "v0.1",
+    "provider": "bitbucket",
+    "findings": [],
+    "evidence": []
+  }
+}
+```
+
+`reviewRun` must use the same contract documented in the findings spec.
+
+### JSONL
+
+Streaming format for CI logs and long-running reviews.
+
+Example events:
+
+```jsonl
+{"type":"started","workspace":"example-workspace","repo":"frontend-app","prId":1731}
+{"type":"log","message":"Running analyzer: tsc"}
+{"type":"warning","message":"Semgrep skipped: command not found"}
+{"type":"result","reviewRun":{...}}
+```
+
+JSONL is useful for future integrations but can be deferred if JSON and markdown
+ship first.
+
+## Exit Codes
+
+```text
+0  review completed and no failing condition was requested
+1  review completed, findings at or above threshold exist, and --fail-on-findings was set
+2  config validation failed
+3  authentication or authorization failed
+4  repository or PR could not be resolved
+5  analyzer required by config failed, timed out, or could not start
+6  model provider failed
+7  runtime/internal error
+130 cancelled by user
+```
+
+Analyzer failures are non-fatal by default. They use exit code `5` only when the
+effective config marks the analyzer as required.
+
+Findings use exit code `1` only when `--fail-on-findings` is set. The threshold
+is controlled by `--min-severity` or repo config.
+
+## Local Interactive Usage
+
+Local usage optimizes for readable terminal output:
+
+```sh
+lachesi review --workspace example-workspace --repo backend-api --pr 1020
+```
+
+Expected behavior:
+
+- use app config and keychain credentials when available
+- resolve local repo path from explicit flag, settings, or discovery
+- load `.lachesi.yaml` and `.lachesi.local.yaml`
+- print progress to stderr
+- print markdown result to stdout unless `--output` is set
+- write structured review state to the same local review store if configured
+
+## CI Usage
+
+CI usage should be deterministic and non-interactive:
+
+```sh
+lachesi review \
+  --workspace "$BITBUCKET_WORKSPACE" \
+  --repo "$BITBUCKET_REPO_SLUG" \
+  --pr "$BITBUCKET_PR_ID" \
+  --repo-path "$PWD" \
+  --format json \
+  --fail-on-findings \
+  --min-severity high
+```
+
+CI assumptions:
+
+- repo path is explicit
+- credentials come from environment or an injected credential provider
+- no desktop settings dialog exists
+- no Tauri runtime exists
+- output should be stable enough for artifacts and annotations
+
+CI should not attempt interactive publication in v0.1.
+
+## Auth and Provider Assumptions
+
+Bitbucket-linked review requires:
+
+- workspace
+- repo slug
+- PR id
+- credentials from keychain, environment, or injected CLI credential provider
+
+The core should preserve the existing security boundary:
+
+- secrets are not read from `.lachesi.yaml`
+- secrets are not included in JSON output
+- webview-only assumptions must not leak into CLI
+
+Jira and Notion enrichment are optional. Missing enrichment credentials should
+warn, not fail review, unless future config marks them required.
+
+## Desktop Behaviors Excluded From v0.1 CLI
+
+The first CLI cut intentionally excludes:
+
+- chat replies to an existing review thread
+- manual pending-review draft staging
+- publishing Bitbucket comments
+- AI fix sessions
+- commit and push workflow
+- conflict resolution workflow
+- GUI progress panes and stored UI layout
+
+These can be added later after the shared review core is stable.
+
+## Implementation Plan
+
+1. Extract review orchestration from Tauri command handlers into a core module.
+2. Keep Tauri commands as thin adapters that call the core and update UI stores.
+3. Define a storage trait for review-store persistence.
+4. Define provider traits for Bitbucket, Jira, Notion, and model execution.
+5. Add a CLI binary entrypoint that calls the core without Tauri.
+6. Implement `lachesi config validate`.
+7. Implement `lachesi review --format markdown|json`.
+8. Add `--evidence-only` once analyzer execution is available.
+
+The extraction should be incremental. Desktop behavior must keep working while
+core logic moves behind adapter boundaries.

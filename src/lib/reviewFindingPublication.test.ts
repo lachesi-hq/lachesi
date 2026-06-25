@@ -1,0 +1,220 @@
+import { describe, expect, it } from "vitest";
+import type { AiReviewStore, DraftComment, ReviewRun } from "@/types";
+import type { LinkedAiReviewDraftComment } from "./aiReviewDraftComments";
+import {
+  filterStageableAiReviewDraftComments,
+  summarizeActiveReviewFindings,
+} from "./reviewFindingPublication";
+
+const previousRun: ReviewRun = {
+  id: "run-0",
+  schemaVersion: "v0.1",
+  provider: "bitbucket",
+  workspace: "example-workspace",
+  repo: "backend-api",
+  prId: 1020,
+  sourceBranch: "feature/invoice-lines-v2-bff-mock",
+  destinationBranch: "develop",
+  status: "succeeded",
+  turnKind: "initial",
+  createdAt: "1750076300000",
+  finishedAt: "1750076350000",
+  diffFingerprint: "prev",
+  threadId: "thread-0",
+  summaryMarkdown: null,
+  evidence: [],
+  findings: [
+    {
+      id: "run-0-finding-1",
+      fingerprint: "fingerprint-1",
+      title: "Add @HttpCode(HttpStatus.OK) to the POST handler",
+      severity: "high",
+      confidence: "high",
+      category: "bug",
+      status: "published",
+      summary: "Bitbucket already has a published comment for the earlier anchor.",
+      rationale: null,
+      ruleId: null,
+      source: "llm",
+      anchor: {
+        path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+        startLine: 28,
+        endLine: null,
+        side: "new",
+      },
+      suggestedFix: null,
+      evidenceIds: [],
+      publication: {
+        mode: "inline",
+        draftIds: [],
+        remoteCommentIds: [101],
+        publishedAt: "2026-06-22T20:10:00.000Z",
+      },
+    },
+  ],
+};
+
+const activeRun: ReviewRun = {
+  id: "run-1",
+  schemaVersion: "v0.1",
+  provider: "bitbucket",
+  workspace: "example-workspace",
+  repo: "backend-api",
+  prId: 1020,
+  sourceBranch: "feature/invoice-lines-v2-bff-mock",
+  destinationBranch: "develop",
+  status: "succeeded",
+  turnKind: "reply",
+  createdAt: "1750076400000",
+  finishedAt: "1750076500000",
+  diffFingerprint: "current",
+  threadId: "thread-1",
+  summaryMarkdown: null,
+  evidence: [],
+  findings: [
+    {
+      id: "run-1-finding-1",
+      fingerprint: "fingerprint-1",
+      title: "Add @HttpCode(HttpStatus.OK) to the POST handler",
+      severity: "high",
+      confidence: "high",
+      category: "bug",
+      status: "new",
+      summary: "The same logical finding reran on a nearby line in the current diff.",
+      rationale: null,
+      ruleId: null,
+      source: "llm",
+      anchor: {
+        path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+        startLine: 29,
+        endLine: null,
+        side: "new",
+      },
+      suggestedFix: null,
+      evidenceIds: [],
+      publication: null,
+    },
+    {
+      id: "run-1-finding-2",
+      fingerprint: "fingerprint-2",
+      title: "Sort the first page deterministically",
+      severity: "medium",
+      confidence: "high",
+      category: "bug",
+      status: "new",
+      summary: "A pending draft already exists for this finding in the current run.",
+      rationale: null,
+      ruleId: null,
+      source: "llm",
+      anchor: {
+        path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+        startLine: 44,
+        endLine: null,
+        side: "new",
+      },
+      suggestedFix: null,
+      evidenceIds: [],
+      publication: {
+        mode: "inline",
+        draftIds: ["draft-2"],
+        remoteCommentIds: [],
+        publishedAt: null,
+      },
+    },
+  ],
+};
+
+const store: AiReviewStore = {
+  activeThreadId: "thread-1",
+  threads: [],
+  reviewRuns: [previousRun, activeRun],
+};
+
+describe("summarizeActiveReviewFindings", () => {
+  it("projects current and historical publication state onto the active run", () => {
+    const summary = summarizeActiveReviewFindings(store, activeRun);
+
+    expect(summary.get("run-1-finding-1")).toMatchObject({
+      alreadyPublished: true,
+      historicalPublishedCount: 1,
+      currentPublishedCount: 0,
+      currentDraftCount: 0,
+      staleAnchor: true,
+      publicationMode: "inline",
+      latestPublishedAt: "2026-06-22T20:10:00.000Z",
+    });
+    expect(summary.get("run-1-finding-2")).toMatchObject({
+      alreadyStaged: true,
+      currentDraftCount: 1,
+      historicalDraftCount: 0,
+      alreadyPublished: false,
+      staleAnchor: false,
+    });
+  });
+});
+
+describe("filterStageableAiReviewDraftComments", () => {
+  it("skips comments already represented by staged drafts, published findings, or local duplicates", () => {
+    const publicationSummary = summarizeActiveReviewFindings(store, activeRun);
+    const existingDrafts: Pick<DraftComment, "path" | "to" | "from" | "raw">[] = [
+      {
+        path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+        to: 77,
+        from: null,
+        raw: "Duplicate general note already staged locally.",
+      },
+    ];
+    const comments: LinkedAiReviewDraftComment[] = [
+      {
+        path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+        to: 29,
+        from: null,
+        raw: "Add @HttpCode(HttpStatus.OK) here so the runtime matches the documented 200 response.",
+        findingRef: {
+          reviewRunId: "run-1",
+          findingId: "run-1-finding-1",
+          findingFingerprint: "fingerprint-1",
+        },
+        publicationMode: "inline",
+      },
+      {
+        path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+        to: 44,
+        from: null,
+        raw: "Avoid dropping pages silently when hasMore and firstPage.pages disagree.",
+        findingRef: {
+          reviewRunId: "run-1",
+          findingId: "run-1-finding-2",
+          findingFingerprint: "fingerprint-2",
+        },
+        publicationMode: "inline",
+      },
+      {
+        path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+        to: 77,
+        from: null,
+        raw: "Duplicate general note already staged locally.",
+        findingRef: null,
+        publicationMode: null,
+      },
+      {
+        path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+        to: 53,
+        from: null,
+        raw: "Consider validating the DTO example so it matches the runtime payload shape.",
+        findingRef: null,
+        publicationMode: null,
+      },
+    ];
+
+    expect(
+      filterStageableAiReviewDraftComments(comments, existingDrafts, publicationSummary),
+    ).toEqual({
+      stageable: [comments[3]],
+      skipped: 3,
+      skippedAlreadyStaged: 1,
+      skippedAlreadyPublished: 1,
+      skippedExistingDrafts: 1,
+    });
+  });
+});

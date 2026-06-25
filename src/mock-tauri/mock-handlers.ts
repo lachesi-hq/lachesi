@@ -1,0 +1,995 @@
+import type {
+  AiReviewDraftCommentSuggestion,
+  AiReviewFixState,
+  AiReviewJob,
+  AiReviewMessage,
+  AiReviewRunState,
+  AiReviewStore,
+  BranchStatus,
+  BranchSyncResult,
+  PrComment,
+  PrListFilter,
+  PullRequestPage,
+  ReviewFinding,
+  ReviewFindingPublication,
+  ReviewFindingPublicationEvent,
+} from "@/types";
+import {
+  mockComments,
+  mockConfig,
+  mockDiffstat,
+  mockPullRequestDetail,
+  mockPullRequests,
+  mockRawDiff,
+} from "./fixtures";
+
+type Handler = (args?: Record<string, unknown>) => unknown;
+
+let mockCommentId = 100000;
+let mockPullRequestDetailState = mockPullRequestDetail;
+const mockFixStates = new Map<string, AiReviewFixState>();
+const mockReviewRunStates = new Map<string, AiReviewRunState>();
+const mockReviewRunTimers = new Map<string, number[]>();
+const mockBranchStatuses = new Map<string, BranchStatus>();
+let mockReviewJobs: AiReviewJob[] = [
+  {
+    id: "job-1",
+    workspace: "example-workspace",
+    repo: "backend-api",
+    prId: 1020,
+    prTitle: "CB-1777 - feat(invoice-lines): add v2 mock query endpoints",
+    sourceBranch: "feature/invoice-lines-v2-bff-mock",
+    destinationBranch: "develop",
+    status: "succeeded",
+    trigger: "menuBar",
+    threadId: "thread-1782153283369168000",
+    error: null,
+    createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
+    startedAt: new Date(Date.now() - 1000 * 60 * 44).toISOString(),
+    finishedAt: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
+  },
+  {
+    id: "job-2",
+    workspace: "example-workspace",
+    repo: "frontend-app",
+    prId: 1731,
+    prTitle: "CB-2066 - fix category drill-down returning empty orders",
+    sourceBranch: "bugfix/CB-2066-budget-drilldown-category-filter",
+    destinationBranch: "develop",
+    status: "running",
+    trigger: "menuBar",
+    threadId: "thread-running",
+    error: null,
+    createdAt: new Date(Date.now() - 1000 * 90).toISOString(),
+    startedAt: new Date(Date.now() - 1000 * 80).toISOString(),
+    finishedAt: null,
+  },
+];
+
+/** localStorage-backed store that simulates on-disk review persistence for browser dev mode. */
+const REVIEW_STORE_KEY = "lachesi.mock.reviews";
+
+function reviewKey(args?: Record<string, unknown>): string {
+  return `${args?.workspace}_${args?.repo}_${args?.id}`;
+}
+
+function runKey(args?: Record<string, unknown>): string {
+  return `${args?.workspace}/${args?.repo}/${args?.id}`;
+}
+
+function fixKey(args?: Record<string, unknown>): string {
+  return `${runKey(args)}/${String(args?.threadId ?? "default")}`;
+}
+
+function branchKey(args?: Record<string, unknown>): string {
+  return `${args?.workspace}/${args?.repo}/${args?.source}/${args?.destination}`;
+}
+
+function updateReviewRunState(key: string, patch: Partial<AiReviewRunState>): AiReviewRunState {
+  const current =
+    mockReviewRunStates.get(key) ??
+    ({
+      prKey: key,
+      prTitle: null,
+      threadId: null,
+      turnKind: null,
+      status: "idle",
+      logs: [],
+      startedAt: null,
+      finishedAt: null,
+      generatedAt: null,
+      error: null,
+    } satisfies AiReviewRunState);
+  const next = { ...current, ...patch };
+  mockReviewRunStates.set(key, next);
+  return next;
+}
+
+function updateFixState(key: string, patch: Partial<AiReviewFixState>): AiReviewFixState {
+  const current =
+    mockFixStates.get(key) ??
+    ({
+      prKey: key.split("/").slice(0, 3).join("/"),
+      threadId: key.split("/").slice(3).join("/") || null,
+      repoPath: mockConfig.repos[0]?.localPath ?? null,
+      status: "idle",
+      phase: "idle",
+      logs: [],
+      startedAt: null,
+      finishedAt: null,
+      suggestedCommitMessage: null,
+      summary: null,
+      commitSha: null,
+      error: null,
+      filesTouched: [],
+      tests: [],
+      claudeDurationMs: null,
+      claudeSessionId: null,
+    } satisfies AiReviewFixState);
+  const next = { ...current, ...patch };
+  mockFixStates.set(key, next);
+  return next;
+}
+
+function clearMockReviewRunTimer(key: string): void {
+  const timers = mockReviewRunTimers.get(key);
+  if (timers?.length) {
+    for (const timer of timers) {
+      window.clearTimeout(timer);
+    }
+  }
+  mockReviewRunTimers.delete(key);
+}
+
+function trackMockReviewRunTimer(key: string, timer: number): void {
+  const current = mockReviewRunTimers.get(key) ?? [];
+  mockReviewRunTimers.set(key, [...current, timer]);
+}
+
+function appendMockReviewLog(key: string, line: string): void {
+  const current = mockReviewRunStates.get(key);
+  if (!current) return;
+  if (current.logs[current.logs.length - 1] === line) return;
+  updateReviewRunState(key, {
+    logs: [...current.logs, line],
+  });
+}
+
+function nowId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function createMessage(role: "user" | "assistant", content: string): AiReviewMessage {
+  return {
+    id: nowId("msg"),
+    role,
+    content,
+    createdAt: String(Date.now()),
+  };
+}
+
+function loadReviewStore(): Map<string, AiReviewStore> {
+  try {
+    const raw = localStorage.getItem(REVIEW_STORE_KEY);
+    if (!raw) return new Map();
+    const obj = JSON.parse(raw) as Record<string, AiReviewStore>;
+    return new Map(Object.entries(obj));
+  } catch {
+    return new Map();
+  }
+}
+
+function saveReviewStore(store: Map<string, AiReviewStore>): void {
+  try {
+    const obj = Object.fromEntries(store);
+    localStorage.setItem(REVIEW_STORE_KEY, JSON.stringify(obj));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function getReviewStore(key: string): AiReviewStore | undefined {
+  return loadReviewStore().get(key);
+}
+
+function setReviewStore(key: string, review: AiReviewStore): void {
+  const store = loadReviewStore();
+  store.set(key, review);
+  saveReviewStore(store);
+}
+
+function ensureFindingPublication(
+  finding: ReviewFinding,
+  mode: ReviewFindingPublication["mode"],
+): ReviewFindingPublication {
+  if (!finding.publication) {
+    finding.publication = {
+      mode,
+      draftIds: [],
+      remoteCommentIds: [],
+      publishedAt: null,
+    };
+  }
+  return finding.publication;
+}
+
+function applyFindingPublicationEvent(
+  finding: ReviewFinding,
+  event: ReviewFindingPublicationEvent,
+): void {
+  switch (event.kind) {
+    case "stageDraft": {
+      const publication = ensureFindingPublication(finding, event.mode);
+      publication.mode = event.mode;
+      if (event.draftId && !publication.draftIds.includes(event.draftId)) {
+        publication.draftIds.push(event.draftId);
+      }
+      return;
+    }
+    case "removeDraft": {
+      if (!finding.publication) return;
+      if (event.draftId) {
+        finding.publication.draftIds = finding.publication.draftIds.filter(
+          (draftId) => draftId !== event.draftId,
+        );
+      }
+      if (
+        finding.publication.draftIds.length === 0 &&
+        finding.publication.remoteCommentIds.length === 0 &&
+        !finding.publication.publishedAt
+      ) {
+        finding.publication = null;
+      }
+      if (!finding.publication && finding.status === "published") {
+        finding.status = "new";
+      }
+      return;
+    }
+    case "publishDraft": {
+      const publication = ensureFindingPublication(finding, event.mode);
+      publication.mode = event.mode;
+      if (event.draftId) {
+        publication.draftIds = publication.draftIds.filter((draftId) => draftId !== event.draftId);
+      }
+      if (
+        event.remoteCommentId != null &&
+        !publication.remoteCommentIds.includes(event.remoteCommentId)
+      ) {
+        publication.remoteCommentIds.push(event.remoteCommentId);
+      }
+      publication.publishedAt = event.publishedAt ?? new Date().toISOString();
+      finding.status = "published";
+    }
+  }
+}
+
+function recordMockFindingPublicationEvents(
+  store: AiReviewStore,
+  events: ReviewFindingPublicationEvent[],
+): AiReviewStore {
+  if (!store.reviewRuns?.length || events.length === 0) return store;
+  const reviewRuns = store.reviewRuns.map((run) => ({
+    ...run,
+    findings: run.findings.map((finding) => ({
+      ...finding,
+      publication: finding.publication
+        ? {
+            ...finding.publication,
+            draftIds: [...finding.publication.draftIds],
+            remoteCommentIds: [...finding.publication.remoteCommentIds],
+          }
+        : null,
+    })),
+  }));
+
+  for (const event of events) {
+    const run = reviewRuns.find((candidate) => candidate.id === event.reviewRunId);
+    const finding = run?.findings.find(
+      (candidate) => candidate.fingerprint === event.findingFingerprint,
+    );
+    if (!finding) continue;
+    applyFindingPublicationEvent(finding, event);
+  }
+
+  return { ...store, reviewRuns };
+}
+
+function deleteReviewStore(key: string): void {
+  const store = loadReviewStore();
+  store.delete(key);
+  saveReviewStore(store);
+}
+
+function pruneReviews(keepKeys: string[]): void {
+  const store = loadReviewStore();
+  const keepSet = new Set(keepKeys);
+  for (const key of store.keys()) {
+    if (!keepSet.has(key)) store.delete(key);
+  }
+  saveReviewStore(store);
+}
+
+function defaultInitialReviewContent(): string {
+  return "## AI Review\n\n### Summary\n\nThis PR looks good overall. A few observations:\n\n- **Logic**: The changes are well-structured and follow existing patterns.\n- **Tests**: Consider adding unit tests for the new utility functions.\n- **Performance**: No obvious performance concerns.\n\n### Suggestions\n\n1. `prAgeDays` could short-circuit when `createdOn` is an empty string.\n2. The `AgeBadge` inline styles could be extracted into a CSS class for reuse.\n\n### Conclusion\n\nApproved with minor suggestions.\n\n## Resources\n\n- [React Hooks reference](https://react.dev/reference/react) — Official docs for all built-in hooks used in this PR\n- [TypeScript Utility Types](https://www.typescriptlang.org/docs/handbook/utility-types.html) — Reference for `Partial`, `Pick`, `Omit` and other utilities\n- [Tauri v2 Commands](https://v2.tauri.app/develop/calling-rust/) — How frontend calls Rust commands via IPC";
+}
+
+function defaultReplyContent(userMessage: string): string {
+  return `I reviewed your follow-up.\n\n- I considered: ${userMessage}\n- The earlier findings still mostly stand, but I would narrow them to the actionable items only.\n- If you want, I can produce a shorter final review focused on bugs and regressions.`;
+}
+
+function enqueueMockInlineReviewSuccess(
+  key: string,
+  title: string,
+  reviewStoreKey: string,
+  threadId: string,
+  content: string,
+  turnKind: "initial" | "reply",
+): void {
+  clearMockReviewRunTimer(key);
+  for (const [delay, line] of [
+    [160, "Claude session initialized (claude-sonnet-4)"],
+    [360, "Finding files matching `**/*.{ts,tsx}`."],
+    [620, "Reading file: src/App.tsx"],
+    [880, "Claude is drafting the review…"],
+  ] as const) {
+    trackMockReviewRunTimer(
+      key,
+      window.setTimeout(() => {
+        appendMockReviewLog(key, line);
+      }, delay),
+    );
+  }
+  const timer = window.setTimeout(() => {
+    const currentStore = getReviewStore(reviewStoreKey);
+    if (!currentStore) return;
+    const thread = currentStore.threads.find((candidate) => candidate.id === threadId);
+    if (!thread) return;
+    const message = createMessage("assistant", content);
+    thread.messages = [...thread.messages, message];
+    thread.updatedAt = message.createdAt;
+    thread.claudeSessionId = thread.claudeSessionId ?? `mock-session-${threadId}`;
+    currentStore.activeThreadId = threadId;
+    setReviewStore(reviewStoreKey, currentStore);
+    updateReviewRunState(key, {
+      prTitle: title,
+      threadId,
+      turnKind,
+      status: "succeeded",
+      finishedAt: String(Date.now()),
+      generatedAt: message.createdAt,
+      error: null,
+      logs: [
+        ...(mockReviewRunStates.get(key)?.logs ?? []),
+        "Claude produced a result.",
+        "Claude finished successfully.",
+      ],
+    });
+    mockReviewRunTimers.delete(key);
+  }, 1200);
+  trackMockReviewRunTimer(key, timer);
+}
+
+function enqueueMockFixSuccess(key: string): void {
+  window.setTimeout(() => {
+    updateFixState(key, {
+      status: "running",
+      phase: "runningClaude",
+      logs: [
+        "Starting AI review fix pipeline…",
+        "Using the configured local path for this repository.",
+        "Claude is applying the review feedback…",
+      ],
+    });
+  }, 120);
+  window.setTimeout(() => {
+    updateFixState(key, {
+      status: "succeeded",
+      phase: "readyToCommit",
+      finishedAt: String(Date.now()),
+      summary: "Claude fixed the actionable review findings and updated the affected files.",
+      suggestedCommitMessage: "Fix AI review findings for PR #1731",
+      filesTouched: [
+        "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.spec.ts",
+      ],
+      tests: ["pnpm test -- buildOrdersUrlFromBudgetRow"],
+      claudeDurationMs: 530,
+      claudeSessionId: "mock-session-1",
+      logs: [
+        "Starting AI review fix pipeline…",
+        "Using the configured local path for this repository.",
+        "Claude is applying the review feedback…",
+        "Claude finished successfully. Review the suggested commit message and commit when ready.",
+      ],
+      error: null,
+    });
+  }, 650);
+}
+
+function enqueueMockCommitSuccess(key: string, message: string): void {
+  const current = mockFixStates.get(key);
+  if (!current) return;
+  window.setTimeout(() => {
+    updateFixState(key, {
+      status: "succeeded",
+      phase: "readyToPush",
+      finishedAt: String(Date.now()),
+      suggestedCommitMessage: message,
+      commitSha: "abc123def456",
+      logs: [
+        ...current.logs,
+        "Staging Claude's changes.",
+        "Creating commit. Pre-commit hooks may be running…",
+        "Commit created successfully: abc123def456",
+      ],
+      error: null,
+    });
+  }, 400);
+}
+
+function enqueueMockPushSuccess(key: string): void {
+  const current = mockFixStates.get(key);
+  if (!current) return;
+  window.setTimeout(() => {
+    updateFixState(key, {
+      status: "succeeded",
+      phase: "completed",
+      finishedAt: String(Date.now()),
+      logs: [
+        ...current.logs,
+        "Pushing the branch. Pre-push hooks may be running…",
+        "Push completed successfully for commit abc123def456.",
+      ],
+      error: null,
+    });
+  }, 400);
+}
+
+interface NewInlineCommentArgs {
+  path: string;
+  to: number | null;
+  from: number | null;
+  raw: string;
+  parentId: number | null;
+}
+
+/**
+ * Mock implementations of the Rust IPC commands, used when running outside
+ * Tauri (browser dev, Storybook, Vitest). Keep the keys in sync with the
+ * `#[tauri::command]` names registered in `src-tauri`.
+ */
+export const mockHandlers: Record<string, Handler> = {
+  load_config: () => mockConfig,
+  validate_repo_review_config: (args) => ({
+    repoPath: String(args?.repoPath ?? ""),
+    configPath: `${String(args?.repoPath ?? "")}/.lachesi.yaml`,
+    exists: false,
+    config: null,
+    warnings: [],
+    errors: [],
+  }),
+  list_repository_worktrees: () => [
+    {
+      workspace: "example-workspace",
+      repo: "frontend-app",
+      localPath: "/Users/alex/dev/example/frontend-app",
+      status: "clean",
+      currentBranch: "feature/review-panel",
+      detachedHead: null,
+      dirty: false,
+      branches: [
+        { name: "develop", reference: "develop", kind: "local", isCurrent: false },
+        {
+          name: "feature/review-panel",
+          reference: "feature/review-panel",
+          kind: "local",
+          isCurrent: true,
+        },
+        { name: "origin/main", reference: "origin/main", kind: "remote", isCurrent: false },
+      ],
+      error: null,
+    },
+    {
+      workspace: "example-workspace",
+      repo: "backend-api",
+      localPath: null,
+      status: "missingPath",
+      currentBranch: null,
+      detachedHead: null,
+      dirty: false,
+      branches: [],
+      error: "No local path configured in Settings.",
+    },
+  ],
+  checkout_repository_branch: (args) => ({
+    workspace: String(args?.workspace ?? "example-workspace"),
+    repo: String(args?.repo ?? "frontend-app"),
+    localPath: "/Users/alex/dev/example/frontend-app",
+    status: "clean",
+    currentBranch: String(args?.branchRef ?? "develop").replace(/^origin\//, ""),
+    detachedHead: null,
+    dirty: false,
+    branches: [
+      { name: "develop", reference: "develop", kind: "local", isCurrent: false },
+      { name: "origin/main", reference: "origin/main", kind: "remote", isCurrent: false },
+    ],
+    error: null,
+  }),
+  fetch_repository: (args) => ({
+    workspace: String(args?.workspace ?? "example-workspace"),
+    repo: String(args?.repo ?? "frontend-app"),
+    localPath: "/Users/alex/dev/example/frontend-app",
+    status: "clean",
+    currentBranch: "feature/review-panel",
+    detachedHead: null,
+    dirty: false,
+    branches: [
+      { name: "develop", reference: "develop", kind: "local", isCurrent: false },
+      {
+        name: "feature/review-panel",
+        reference: "feature/review-panel",
+        kind: "local",
+        isCurrent: true,
+      },
+      { name: "origin/main", reference: "origin/main", kind: "remote", isCurrent: false },
+      {
+        name: "origin/feature/new-branch",
+        reference: "origin/feature/new-branch",
+        kind: "remote",
+        isCurrent: false,
+      },
+    ],
+    error: null,
+  }),
+  pull_repository: (args) => ({
+    workspace: String(args?.workspace ?? "example-workspace"),
+    repo: String(args?.repo ?? "frontend-app"),
+    localPath: "/Users/alex/dev/example/frontend-app",
+    status: "clean",
+    currentBranch: "feature/review-panel",
+    detachedHead: null,
+    dirty: false,
+    branches: [
+      { name: "develop", reference: "develop", kind: "local", isCurrent: false },
+      {
+        name: "feature/review-panel",
+        reference: "feature/review-panel",
+        kind: "local",
+        isCurrent: true,
+      },
+      { name: "origin/main", reference: "origin/main", kind: "remote", isCurrent: false },
+    ],
+    error: null,
+  }),
+  list_ai_review_jobs: () => mockReviewJobs,
+  update_ai_review_job_status: (args) => {
+    const jobId = String(args?.jobId ?? "");
+    const next = mockReviewJobs.find((job) => job.id === jobId);
+    if (!next) throw new Error(`Unknown review job: ${jobId}`);
+    const status = String(args?.status ?? next.status) as AiReviewJob["status"];
+    const updated: AiReviewJob = {
+      ...next,
+      status,
+      threadId: args?.threadId == null ? next.threadId : String(args.threadId),
+      error: args?.error == null ? null : String(args.error),
+      startedAt: next.startedAt ?? (status === "running" ? new Date().toISOString() : null),
+      finishedAt:
+        status === "succeeded" || status === "failed" || status === "cancelled"
+          ? new Date().toISOString()
+          : next.finishedAt,
+    };
+    mockReviewJobs = mockReviewJobs.map((job) => (job.id === jobId ? updated : job));
+    return updated;
+  },
+  has_credentials: () => true,
+  test_connection: () => ({ displayName: "Alex Reviewer" }),
+  get_current_user: () => ({ displayName: "Alex Reviewer", accountId: "alex" }),
+  save_config: () => null,
+  save_credentials: () => null,
+  clear_credentials: () => null,
+  list_review_terminals: () => [
+    { id: "wezterm", label: "WezTerm", available: true },
+    { id: "iterm", label: "iTerm2", available: true },
+    { id: "terminal", label: "Terminal", available: true },
+  ],
+
+  list_pull_requests: (args) => {
+    const opts = (args?.opts ?? {}) as { state?: PrListFilter };
+    const filter = opts.state ?? "OPEN";
+    const values =
+      filter === "ALL" ? mockPullRequests : mockPullRequests.filter((pr) => pr.state === filter);
+    const page: PullRequestPage = {
+      values,
+      size: values.length,
+      page: 1,
+      hasNext: false,
+    };
+    return page;
+  },
+
+  get_pull_request: () => mockPullRequestDetailState,
+  approve_pull_request: () => {
+    mockPullRequestDetailState = {
+      ...mockPullRequestDetailState,
+      reviewers: mockPullRequestDetailState.reviewers.map((reviewer) =>
+        reviewer.accountId === "alex" ? { ...reviewer, approved: true } : reviewer,
+      ),
+    };
+    return mockPullRequestDetailState;
+  },
+  get_branch_status: (args) =>
+    mockBranchStatuses.get(branchKey(args)) ?? {
+      behind: 4,
+      ahead: 2,
+      behindCapped: false,
+      aheadCapped: false,
+    },
+  get_diffstat: () => mockDiffstat,
+  get_pr_diff: () => mockRawDiff,
+  list_comments: () => mockComments,
+
+  create_inline_comment: (args) => {
+    const req = (args?.req ?? {}) as NewInlineCommentArgs;
+    mockCommentId += 1;
+    const comment: PrComment = {
+      id: mockCommentId,
+      parentId: req.parentId ?? null,
+      contentRaw: req.raw,
+      userDisplayName: "Alex Reviewer",
+      createdOn: new Date(0).toISOString(),
+      deleted: false,
+      inline: { path: req.path, to: req.to ?? null, from: req.from ?? null },
+    };
+    return comment;
+  },
+  create_general_comment: (args) => {
+    const raw = (args?.raw ?? "") as string;
+    mockCommentId += 1;
+    const comment: PrComment = {
+      id: mockCommentId,
+      parentId: (args?.parentId as number | null) ?? null,
+      contentRaw: raw,
+      userDisplayName: "Alex Reviewer",
+      createdOn: new Date(0).toISOString(),
+      deleted: false,
+      inline: null,
+    };
+    return comment;
+  },
+  delete_comment: () => null,
+  launch_claude_review: () => null,
+  load_ai_review_store: (args) => getReviewStore(reviewKey(args)) ?? null,
+  create_ai_review_thread: (args) => {
+    const key = reviewKey(args);
+    const threadId = nowId("thread");
+    const now = String(Date.now());
+    const initialMessage = String(args?.initialMessage ?? "").trim();
+    const current = getReviewStore(key);
+    const next: AiReviewStore = {
+      activeThreadId: threadId,
+      threads: [
+        ...(current?.threads ?? []),
+        {
+          id: threadId,
+          title: String(args?.title ?? "Ask"),
+          createdAt: now,
+          updatedAt: now,
+          claudeSessionId: null,
+          messages: initialMessage ? [createMessage("user", initialMessage)] : [],
+        },
+      ],
+      reviewRuns: current?.reviewRuns ?? [],
+    };
+    setReviewStore(key, next);
+    return next;
+  },
+  set_active_ai_review_thread: (args) => {
+    const key = reviewKey(args);
+    const current = getReviewStore(key);
+    if (!current) return null;
+    const threadId = String(args?.threadId ?? "");
+    const next = { ...current, activeThreadId: threadId };
+    setReviewStore(key, next);
+    return next;
+  },
+  delete_ai_review_thread: (args) => {
+    const key = reviewKey(args);
+    const current = getReviewStore(key);
+    if (!current) return null;
+    const threadId = String(args?.threadId ?? "");
+    const threads = current.threads.filter((thread) => thread.id !== threadId);
+    if (threads.length === 0) {
+      deleteReviewStore(key);
+      return null;
+    }
+    const next: AiReviewStore = {
+      activeThreadId: threads[0]?.id ?? null,
+      threads,
+      reviewRuns: current.reviewRuns?.filter((run) => run.threadId !== threadId),
+    };
+    setReviewStore(key, next);
+    return next;
+  },
+  record_ai_review_finding_publication: (args) => {
+    const key = reviewKey(args);
+    const current = getReviewStore(key);
+    if (!current) return null;
+    const events = (args?.events as ReviewFindingPublicationEvent[] | undefined) ?? [];
+    const next = recordMockFindingPublicationEvents(current, events);
+    setReviewStore(key, next);
+    return next;
+  },
+  cleanup_stale_reviews: (args) => {
+    const keepKeys = (args?.keepKeys as string[] | undefined) ?? [];
+    pruneReviews(keepKeys);
+  },
+  get_ai_review_run_state: (args) => mockReviewRunStates.get(runKey(args)) ?? null,
+  start_inline_review: (args) => {
+    const key = runKey(args);
+    const title = String(args?.title ?? `PR #${String(args?.id ?? "")}`);
+    const storeKey = reviewKey(args);
+    const threadId = nowId("thread");
+    const now = String(Date.now());
+    const displayMessage = String(args?.displayMessage ?? "").trim();
+    const nextStore: AiReviewStore = {
+      activeThreadId: threadId,
+      threads: [
+        ...(getReviewStore(storeKey)?.threads ?? []),
+        {
+          id: threadId,
+          title: "AI review",
+          createdAt: now,
+          updatedAt: now,
+          claudeSessionId: null,
+          messages: displayMessage ? [createMessage("user", displayMessage)] : [],
+        },
+      ],
+    };
+    setReviewStore(storeKey, nextStore);
+    const next = updateReviewRunState(key, {
+      prKey: key,
+      prTitle: title,
+      threadId,
+      turnKind: "initial",
+      status: "running",
+      logs: [
+        "Starting AI review…",
+        `Reviewing PR: ${title}`,
+        `Saving output to review thread ${threadId}.`,
+        ...(args?.claudeModel ? [`Claude model: ${String(args.claudeModel)}`] : []),
+        ...(args?.claudeEffort ? [`Claude effort: ${String(args.claudeEffort)}`] : []),
+      ],
+      startedAt: String(Date.now()),
+      finishedAt: null,
+      generatedAt: null,
+      error: null,
+    });
+    enqueueMockInlineReviewSuccess(
+      key,
+      title,
+      storeKey,
+      threadId,
+      defaultInitialReviewContent(),
+      "initial",
+    );
+    return next;
+  },
+  reply_inline_review: (args) => {
+    const key = runKey(args);
+    const title = String(args?.title ?? `PR #${String(args?.id ?? "")}`);
+    const storeKey = reviewKey(args);
+    const threadId = String(args?.threadId ?? "");
+    const userMessage = String(args?.userMessage ?? "").trim();
+    const currentStore = getReviewStore(storeKey);
+    const thread = currentStore?.threads.find((candidate) => candidate.id === threadId);
+    if (!currentStore || !thread || !userMessage) {
+      return updateReviewRunState(key, {
+        prKey: key,
+        prTitle: title,
+        threadId,
+        turnKind: "reply",
+        status: "failed",
+        finishedAt: String(Date.now()),
+        error: "Unable to append a reply to the active AI review thread.",
+      });
+    }
+    const userEntry = createMessage("user", userMessage);
+    thread.messages = [...thread.messages, userEntry];
+    thread.updatedAt = userEntry.createdAt;
+    currentStore.activeThreadId = threadId;
+    setReviewStore(storeKey, currentStore);
+    const next = updateReviewRunState(key, {
+      prKey: key,
+      prTitle: title,
+      threadId,
+      turnKind: "reply",
+      status: "running",
+      logs: [
+        "Continuing AI review chat…",
+        `Reviewing PR: ${title}`,
+        `Saving output to review thread ${threadId}.`,
+      ],
+      startedAt: String(Date.now()),
+      finishedAt: null,
+      generatedAt: null,
+      error: null,
+    });
+    enqueueMockInlineReviewSuccess(
+      key,
+      title,
+      storeKey,
+      threadId,
+      defaultReplyContent(userMessage),
+      "reply",
+    );
+    return next;
+  },
+  cancel_inline_review: (args) => {
+    const key = runKey(args);
+    clearMockReviewRunTimer(key);
+    return updateReviewRunState(key, {
+      status: "cancelled",
+      finishedAt: String(Date.now()),
+      error: null,
+      logs: [...(mockReviewRunStates.get(key)?.logs ?? []), "Review cancelled by the user."],
+    });
+  },
+  draft_ai_review_comments: () =>
+    [
+      {
+        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        to: 17,
+        from: null,
+        raw: "Please add a regression test covering the `categoryErpId` path used for the generated orders URL.",
+      },
+    ] satisfies AiReviewDraftCommentSuggestion[],
+  get_ai_review_fix_state: (args) => mockFixStates.get(fixKey(args)) ?? null,
+  start_ai_review_fix: (args) => {
+    const key = fixKey(args);
+    const prKey = runKey(args);
+    const next = updateFixState(key, {
+      prKey,
+      threadId: (args?.threadId as string | null) ?? null,
+      repoPath: mockConfig.repos[0]?.localPath ?? null,
+      status: "running",
+      phase: "preflight",
+      logs: ["Starting AI review fix pipeline…"],
+      startedAt: String(Date.now()),
+      finishedAt: null,
+      suggestedCommitMessage: null,
+      summary: null,
+      commitSha: null,
+      error: null,
+      filesTouched: [],
+      tests: [],
+      claudeDurationMs: null,
+      claudeSessionId: null,
+    });
+    enqueueMockFixSuccess(key);
+    return next;
+  },
+  start_ai_review_commit: (args) => {
+    const key = fixKey(args);
+    const current = mockFixStates.get(key);
+    const message = String(args?.message ?? "");
+    const next = updateFixState(key, {
+      status: "running",
+      phase: "committing",
+      suggestedCommitMessage: message,
+      logs: [...(current?.logs ?? []), "Creating commit. Pre-commit hooks may be running…"],
+      error: null,
+    });
+    enqueueMockCommitSuccess(key, message);
+    return next;
+  },
+  start_ai_review_push: (args) => {
+    const key = fixKey(args);
+    const current = mockFixStates.get(key);
+    const next = updateFixState(key, {
+      status: "running",
+      phase: "pushing",
+      logs: [...(current?.logs ?? []), "Pushing the branch. Pre-push hooks may be running…"],
+      error: null,
+    });
+    enqueueMockPushSuccess(key);
+    return next;
+  },
+  reset_ai_review_fix_state: (args) => {
+    mockFixStates.delete(fixKey(args));
+    return null;
+  },
+  sync_pr_branch: (args) => {
+    const source = String(args?.sourceBranch ?? "");
+    const destination = String(args?.destinationBranch ?? "");
+    mockBranchStatuses.set(`${args?.workspace}/${args?.repo}/${source}/${destination}`, {
+      behind: 0,
+      ahead: 3,
+      behindCapped: false,
+      aheadCapped: false,
+    });
+    return {
+      status: "success",
+      repoPath: mockConfig.repos[0]?.localPath ?? "/mock/repo",
+      sourceBranch: source,
+      destinationBranch: destination,
+      summary: `Merged ${destination} into ${source} and pushed the updated branch to origin.`,
+      syncCommitSha: "sync123abc456",
+      warning: null,
+      conflictFiles: [],
+      logs: [
+        "Fetching latest commits from origin.",
+        `Merging origin/${destination} into ${source}.`,
+        "Pushing synced branch to origin.",
+      ],
+    } satisfies BranchSyncResult;
+  },
+  start_ai_conflict_resolution: (args) => {
+    const key = fixKey(args);
+    const prKey = runKey(args);
+    const tips =
+      typeof args?.tips === "string" && args.tips.trim().length > 0 ? args.tips.trim() : null;
+    const next = updateFixState(key, {
+      prKey,
+      threadId: (args?.threadId as string | null) ?? null,
+      repoPath: mockConfig.repos[0]?.localPath ?? null,
+      status: "running",
+      phase: "resolvingConflicts",
+      logs: [
+        "Starting AI conflict resolution pipeline…",
+        "Recreating the merge state with the destination branch.",
+        ...(tips ? [`Applying reviewer tips: ${tips}`] : []),
+        "Claude is resolving the merge conflicts…",
+      ],
+      startedAt: String(Date.now()),
+      finishedAt: null,
+      suggestedCommitMessage: null,
+      summary: null,
+      commitSha: null,
+      error: null,
+      filesTouched: [],
+      tests: [],
+      claudeDurationMs: null,
+      claudeSessionId: null,
+    });
+    window.setTimeout(() => {
+      updateFixState(key, {
+        status: "succeeded",
+        phase: "readyToCommit",
+        finishedAt: String(Date.now()),
+        summary:
+          "Claude resolved the merge conflicts and staged the result. Review the merge commit and commit when ready.",
+        suggestedCommitMessage: "Merge develop into feature/invoice-lines-v2-bff-mock",
+        filesTouched: [
+          "src/app/modules/invoice-lines/invoice-lines-v2.service.ts",
+          "src/app/modules/invoice-lines/dtos/query-invoice-lines-v2-body.dto.ts",
+        ],
+        tests: ["pnpm test -- invoice-lines-v2"],
+        claudeDurationMs: 820,
+        claudeSessionId: "mock-conflict-session-1",
+        logs: [
+          "Starting AI conflict resolution pipeline…",
+          "Recreating the merge state with the destination branch.",
+          ...(tips ? [`Applying reviewer tips: ${tips}`] : []),
+          "Claude is resolving the merge conflicts…",
+          "Claude resolved the merge conflicts. Review the merge commit message and commit when ready.",
+        ],
+        error: null,
+      });
+    }, 800);
+    return next;
+  },
+  save_jira_token: () => null,
+  save_notion_token: () => null,
+  get_jira_issue: (args) => ({
+    key: (args?.key as string) ?? "CB-0000",
+    summary: "Add order ID and article ID as query filters for order lines",
+    status: "In Progress",
+    descriptionText:
+      "As a user I want to filter order lines by order id and article id.\nAcceptance: filters combine (AND); empty values are ignored.",
+    notionUrls: ["https://www.notion.so/example/Order-lines-filters-abc123def4567890abc123def45678"],
+  }),
+  get_notion_page: () => ({
+    title: "Order lines filters — spec",
+    text: "## Goal\nLet users narrow order lines by order id and article id.\n- Filters combine (AND)\n- An empty filter is ignored",
+  }),
+};

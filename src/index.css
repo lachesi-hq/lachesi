@@ -1,0 +1,368 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ----------------------------------------------------------------------------
+   Design tokens — GitHub-flavored, light + dark.
+   Semantic CSS variables consumed by Tailwind utilities via @theme inline.
+---------------------------------------------------------------------------- */
+:root {
+  --background: #ffffff;
+  --foreground: #1f2328;
+  --card: #ffffff;
+  --card-foreground: #1f2328;
+  --popover: #ffffff;
+  --popover-foreground: #1f2328;
+  --primary: #1f6feb;
+  --primary-foreground: #ffffff;
+  --secondary: #f6f8fa;
+  --secondary-foreground: #1f2328;
+  --muted: #f6f8fa;
+  --muted-foreground: #59636e;
+  --accent: #ddf4ff;
+  --accent-foreground: #0969da;
+  --destructive: #cf222e;
+  --destructive-foreground: #ffffff;
+  --success: #1a7f37;
+  --warning: #9a6700;
+  --border: #d1d9e0;
+  --input: #d1d9e0;
+  --ring: #1f6feb;
+
+  /* Sidebar / surfaces */
+  --sidebar: #f6f8fa;
+  --sidebar-foreground: #1f2328;
+
+  /* Diff */
+  --diff-add-bg: #e6ffec;
+  --diff-add-gutter: #ccffd8;
+  --diff-del-bg: #ffebe9;
+  --diff-del-gutter: #ffd7d5;
+  --diff-hunk-bg: #f6f8fa;
+  --diff-word-add: #abf2bc;
+  --diff-word-del: #ffc1bc;
+
+  /* Bottom pane toolbar */
+  --toolbar-height: 32px;
+  --toolbar-bg: #f6f8fa;
+  --toolbar-line: #d1d9e0;
+  --toolbar-line-strong: #c2cad2;
+  --toolbar-icon: #59636e;
+  --toolbar-ink: #1f2328;
+  --toolbar-hover-bg: #eef2f6;
+  --toolbar-active-bg: rgba(31, 111, 235, 0.12);
+  --toolbar-active-ink: #0969da;
+  --toolbar-accent: #1f6feb;
+  --toolbar-tooltip-bg: #ffffff;
+
+  --radius: 0.5rem;
+}
+
+[data-theme="dark"] {
+  --background: #0d1117;
+  --foreground: #e6edf3;
+  --card: #0d1117;
+  --card-foreground: #e6edf3;
+  --popover: #161b22;
+  --popover-foreground: #e6edf3;
+  --primary: #2f81f7;
+  --primary-foreground: #ffffff;
+  --secondary: #161b22;
+  --secondary-foreground: #e6edf3;
+  --muted: #161b22;
+  --muted-foreground: #9198a1;
+  --accent: #121d2f;
+  --accent-foreground: #58a6ff;
+  --destructive: #f85149;
+  --destructive-foreground: #ffffff;
+  --success: #3fb950;
+  --warning: #d29922;
+  --border: #30363d;
+  --input: #30363d;
+  --ring: #2f81f7;
+
+  --sidebar: #0d1117;
+  --sidebar-foreground: #e6edf3;
+
+  --diff-add-bg: #12261e;
+  --diff-add-gutter: #1f572f;
+  --diff-del-bg: #25171c;
+  --diff-del-gutter: #6e1c24;
+  --diff-hunk-bg: #161b22;
+  --diff-word-add: #2ea04366;
+  --diff-word-del: #f8514966;
+
+  --toolbar-bg: #0f141b;
+  --toolbar-line: #1c1f24;
+  --toolbar-line-strong: #2f363d;
+  --toolbar-icon: #565b64;
+  --toolbar-ink: #e6edf3;
+  --toolbar-hover-bg: #161b22;
+  --toolbar-active-bg: rgba(97, 175, 239, 0.12);
+  --toolbar-active-ink: #d7e8ff;
+  --toolbar-accent: #61afef;
+  --toolbar-tooltip-bg: #171b23;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+
+  --font-mono: "SFMono-Regular", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.bottom-toolbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--toolbar-height);
+  padding: 0 14px;
+  border-top: 1px solid var(--toolbar-line);
+  background: var(--toolbar-bg);
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  overflow: visible;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow: visible;
+}
+
+.toolbar-toggle,
+.toolbar-status {
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 10px;
+}
+
+.toolbar-toggle {
+  position: relative;
+  border: 0;
+  border-right: 1px solid var(--toolbar-line);
+  background: transparent;
+  color: var(--toolbar-icon);
+  overflow: visible;
+}
+
+.toolbar-toggle:first-child {
+  border-left: 1px solid var(--toolbar-line);
+}
+
+.toolbar-toggle:hover:not(:disabled) {
+  background: var(--toolbar-hover-bg);
+  color: var(--toolbar-ink);
+}
+
+.toolbar-toggle[data-active="true"] {
+  background: var(--toolbar-active-bg);
+  color: var(--toolbar-active-ink);
+  box-shadow: inset 0 -1px 0 var(--toolbar-accent);
+}
+
+.toolbar-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.toolbar-toggle--icon {
+  width: 29px;
+  min-width: 29px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toolbar-icon {
+  display: block;
+}
+
+.toolbar-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 7px);
+  transform: translateX(-50%);
+  display: none;
+  padding: 4px 7px;
+  border: 1px solid var(--toolbar-line-strong);
+  background: var(--toolbar-tooltip-bg);
+  color: var(--toolbar-ink);
+  font-size: 0.7rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  z-index: 30;
+}
+
+.toolbar-toggle--icon:hover:not(:disabled) .toolbar-tooltip,
+.toolbar-toggle--icon:focus-visible .toolbar-tooltip {
+  display: block;
+}
+
+.toolbar-group:first-child .toolbar-toggle:first-child .toolbar-tooltip {
+  left: 0;
+  transform: none;
+}
+
+.toolbar-group:last-child .toolbar-toggle:last-child .toolbar-tooltip {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.toolbar-status {
+  display: inline-flex;
+  align-items: center;
+  border-left: 1px solid var(--toolbar-line);
+  color: var(--muted-foreground);
+}
+
+/* ----------------------------------------------------------------------------
+   Rendered markdown (PR descriptions, comment bodies).
+---------------------------------------------------------------------------- */
+.lachesi-md {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--foreground);
+  word-break: break-word;
+}
+.lachesi-md > *:first-child {
+  margin-top: 0;
+}
+.lachesi-md > *:last-child {
+  margin-bottom: 0;
+}
+.lachesi-md h1,
+.lachesi-md h2,
+.lachesi-md h3,
+.lachesi-md h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.2em 0 0.5em;
+}
+.lachesi-md h1 {
+  font-size: 1.4em;
+}
+.lachesi-md h2 {
+  font-size: 1.2em;
+  padding-bottom: 0.2em;
+  border-bottom: 1px solid var(--border);
+}
+.lachesi-md h3 {
+  font-size: 1.05em;
+}
+.lachesi-md p {
+  margin: 0.6em 0;
+}
+.lachesi-md ul,
+.lachesi-md ol {
+  margin: 0.6em 0;
+  padding-left: 1.4em;
+}
+.lachesi-md ul {
+  list-style: disc;
+}
+.lachesi-md ol {
+  list-style: decimal;
+}
+.lachesi-md li {
+  margin: 0.2em 0;
+}
+.lachesi-md a {
+  color: var(--accent-foreground);
+  text-decoration: underline;
+}
+.lachesi-md code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--muted);
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+}
+.lachesi-md pre {
+  background: var(--muted);
+  padding: 0.75em 1em;
+  border-radius: 0.4em;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.lachesi-md pre code {
+  background: transparent;
+  padding: 0;
+}
+.lachesi-md blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 0.8em;
+  margin: 0.6em 0;
+  color: var(--muted-foreground);
+}
+.lachesi-md table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  overflow-x: auto;
+}
+.lachesi-md th,
+.lachesi-md td {
+  border: 1px solid var(--border);
+  padding: 0.3em 0.6em;
+}
+.lachesi-md hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+.lachesi-md img {
+  max-width: 100%;
+}
