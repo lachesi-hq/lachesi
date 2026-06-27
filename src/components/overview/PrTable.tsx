@@ -1,5 +1,6 @@
 import { ChatCircle, CheckCircle, Clock } from "@phosphor-icons/react";
 import type * as React from "react";
+import { Avatar } from "@/components/ui/avatar";
 import type { PullRequestSummary } from "@/types";
 import { formatAge, prAgeDays } from "./prAge";
 
@@ -147,7 +148,7 @@ export function PrTable({ pullRequests, currentUserAccountId, onSelectPr }: PrTa
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">
-                  {pr.authorDisplayName}
+                  <Avatar name={pr.authorDisplayName} size="sm" />
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">{pr.repo}</td>
                 <td className="whitespace-nowrap px-3 py-2.5">

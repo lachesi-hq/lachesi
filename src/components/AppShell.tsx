@@ -86,7 +86,7 @@ export function AppShell({
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      <header className="flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
+      <header className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-secondary px-3">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold tracking-tight">Lachesi</span>
           <span className="text-xs text-muted-foreground">Bitbucket review</span>

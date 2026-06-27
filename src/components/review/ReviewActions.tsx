@@ -19,11 +19,12 @@ export function ReviewActions({ workspace, repo, onOpenAiReview }: ReviewActions
   const [editing, setEditing] = useState(false);
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-2">
       {onOpenAiReview && (
         <Button
           size="sm"
-          variant="secondary"
+          variant="ghost"
+          className="h-9 rounded-full border border-border bg-secondary px-3 text-[13px] font-bold text-foreground hover:bg-muted"
           onClick={onOpenAiReview}
           title="Open the AI chat for this pull request"
         >
@@ -34,6 +35,7 @@ export function ReviewActions({ workspace, repo, onOpenAiReview }: ReviewActions
       <Button
         size="icon"
         variant="ghost"
+        className="size-9 rounded-full border border-border bg-secondary hover:bg-muted"
         onClick={() => setEditing(true)}
         aria-label="Edit AI review prompt"
         title="Edit AI review prompt for this repo"

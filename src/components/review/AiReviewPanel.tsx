@@ -586,89 +586,99 @@ export function AiReviewPanel({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-        <Sparkle size={14} className="shrink-0 text-primary" />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">AI Review</span>
-        {activeThread && !loading && (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatGeneratedAt(activeThread.updatedAt)}
-          </span>
-        )}
-        {findingCount > 0 && <Badge variant="secondary">{findingCount} findings</Badge>}
-        {stagedFindingCount > 0 && <Badge variant="muted">{stagedFindingCount} staged</Badge>}
-        {publishedFindingCount > 0 && (
-          <Badge variant="success">{publishedFindingCount} published</Badge>
-        )}
-        {loading && onCancelReview ? (
+      <div className="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Sparkle size={14} className="shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">AI Review</span>
+          {activeThread && !loading && (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {formatGeneratedAt(activeThread.updatedAt)}
+            </span>
+          )}
           <Button
-            size="sm"
-            variant="secondary"
-            className="shrink-0"
-            onClick={() => void onCancelReview()}
+            size="icon"
+            variant="ghost"
+            className="size-7 shrink-0"
+            onClick={onClose}
+            title="Close AI review panel"
+            aria-label="Close AI review panel"
           >
             <X size={14} />
-            Cancel review
           </Button>
-        ) : onRun ? (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7 shrink-0"
-            onClick={onRun}
-            disabled={fixRunning}
-            title="Run AI review"
-            aria-label="Run AI review"
-          >
-            <ArrowsClockwise size={14} />
-          </Button>
-        ) : null}
-        {activeThread && !loading && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7 shrink-0"
-            onClick={handleCopy}
-            title="Copy active thread"
-            aria-label="Copy active thread"
-          >
-            {copied ? <Check size={14} className="text-green-500" /> : <ClipboardText size={14} />}
-          </Button>
-        )}
-        {activeThread && onClearThread && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7 shrink-0"
-            onClick={handleDeleteThread}
-            disabled={loading || fixRunning}
-            title="Delete active review thread"
-            aria-label="Delete active review thread"
-          >
-            <Trash size={14} />
-          </Button>
-        )}
-        {onToggleExpand && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7 shrink-0"
-            onClick={onToggleExpand}
-            title={expanded ? "Collapse panel" : "Expand panel to full width"}
-            aria-label={expanded ? "Collapse panel" : "Expand panel to full width"}
-          >
-            {expanded ? <ArrowsIn size={14} /> : <ArrowsOut size={14} />}
-          </Button>
-        )}
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-7 shrink-0"
-          onClick={onClose}
-          title="Close AI review panel"
-          aria-label="Close AI review panel"
-        >
-          <X size={14} />
-        </Button>
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {findingCount > 0 && <Badge variant="secondary">{findingCount} findings</Badge>}
+          {stagedFindingCount > 0 && <Badge variant="muted">{stagedFindingCount} staged</Badge>}
+          {publishedFindingCount > 0 && (
+            <Badge variant="success">{publishedFindingCount} published</Badge>
+          )}
+          <div className="ml-auto flex items-center gap-1">
+            {loading && onCancelReview ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-7 shrink-0 px-2 text-xs"
+                onClick={() => void onCancelReview()}
+              >
+                <X size={14} />
+                Cancel
+              </Button>
+            ) : onRun ? (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7 shrink-0"
+                onClick={onRun}
+                disabled={fixRunning}
+                title="Run AI review"
+                aria-label="Run AI review"
+              >
+                <ArrowsClockwise size={14} />
+              </Button>
+            ) : null}
+            {activeThread && !loading && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7 shrink-0"
+                onClick={handleCopy}
+                title="Copy active thread"
+                aria-label="Copy active thread"
+              >
+                {copied ? (
+                  <Check size={14} className="text-green-500" />
+                ) : (
+                  <ClipboardText size={14} />
+                )}
+              </Button>
+            )}
+            {activeThread && onClearThread && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7 shrink-0"
+                onClick={handleDeleteThread}
+                disabled={loading || fixRunning}
+                title="Delete active review thread"
+                aria-label="Delete active review thread"
+              >
+                <Trash size={14} />
+              </Button>
+            )}
+            {onToggleExpand && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7 shrink-0"
+                onClick={onToggleExpand}
+                title={expanded ? "Collapse panel" : "Expand panel to full width"}
+                aria-label={expanded ? "Collapse panel" : "Expand panel to full width"}
+              >
+                {expanded ? <ArrowsIn size={14} /> : <ArrowsOut size={14} />}
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
 
       {showViewTabs && (
@@ -1024,11 +1034,12 @@ export function AiReviewPanel({
                 />
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
                   <span>Cmd/Ctrl + Enter to send</span>
-                  <div className="flex flex-wrap items-center justify-end gap-2">
+                  <div className="grid w-full grid-cols-2 gap-2">
                     {onRun && (
                       <Button
                         size="sm"
                         variant="secondary"
+                        className="w-full min-w-0 px-2"
                         onClick={() => {
                           setPanelView("review");
                           onRun();
@@ -1042,6 +1053,7 @@ export function AiReviewPanel({
                     <Button
                       size="sm"
                       variant="secondary"
+                      className="w-full min-w-0 px-2"
                       disabled={newThreadDisabled || !newThreadMessage.trim()}
                       onClick={sendNewThreadMessage}
                     >
@@ -1251,11 +1263,12 @@ export function AiReviewPanel({
                   />
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
                     <span>Cmd/Ctrl + Enter to send</span>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="grid w-full grid-cols-2 gap-2">
                       {onStageComments && (
                         <Button
                           size="sm"
                           variant="secondary"
+                          className="w-full min-w-0 px-2"
                           disabled={!canStageComments}
                           onClick={() => {
                             if (!onStageComments || stageCommentsBusy) return;
@@ -1290,6 +1303,7 @@ export function AiReviewPanel({
                       {onStartFix && (
                         <Button
                           size="sm"
+                          className="w-full min-w-0 px-2"
                           onClick={() => {
                             setPanelView("output");
                             void onStartFix();
@@ -1308,6 +1322,7 @@ export function AiReviewPanel({
                         <Button
                           size="sm"
                           variant="secondary"
+                          className="w-full min-w-0 px-2"
                           onClick={() => {
                             setPanelView("review");
                             onRun();
@@ -1321,6 +1336,7 @@ export function AiReviewPanel({
                       <Button
                         size="sm"
                         variant="secondary"
+                        className="w-full min-w-0 px-2"
                         disabled={replySendDisabled || !replyValue.trim()}
                         onClick={sendReply}
                       >
