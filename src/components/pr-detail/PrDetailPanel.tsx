@@ -531,10 +531,10 @@ function ApprovePullRequestButton({
     <div className="flex flex-col items-end gap-1">
       <Button
         size="sm"
-        variant={approved ? "secondary" : "default"}
+        variant="ghost"
         onClick={() => void handleApprove()}
         disabled={busy || approved}
-        className={approved ? "border-success/30 bg-success/10 text-success" : undefined}
+        className="h-9 rounded-full border border-[#10b981] bg-[#10b981]/10 px-3 text-[13px] font-bold text-[#10b981] hover:bg-[#10b981]/15 hover:text-[#10b981] disabled:opacity-70"
         title={
           approved
             ? "You have already approved this pull request"

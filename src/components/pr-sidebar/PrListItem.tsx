@@ -1,4 +1,5 @@
 import { ChatCircle, GitBranch } from "@phosphor-icons/react";
+import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types";
@@ -37,7 +38,7 @@ export function PrListItem({ pr, active, onSelect }: PrListItemProps) {
         </span>
       </div>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="truncate">{pr.authorDisplayName}</span>
+        <Avatar name={pr.authorDisplayName} size="sm" />
         <span className="flex items-center gap-1">
           <GitBranch size={12} />
           {pr.sourceBranch}

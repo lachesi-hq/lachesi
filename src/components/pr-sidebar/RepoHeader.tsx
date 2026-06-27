@@ -1,4 +1,10 @@
-import { ArrowsClockwise, CaretDoubleDown, CaretDoubleUp, ChartBar, GearSix } from "@phosphor-icons/react";
+import {
+  ArrowsClockwise,
+  CaretDoubleDown,
+  CaretDoubleUp,
+  ChartBar,
+  GearSix,
+} from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 
 export interface RepoHeaderProps {
@@ -22,7 +28,7 @@ export function RepoHeader({
   onOpenOverview,
 }: RepoHeaderProps) {
   return (
-    <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+    <div className="flex items-center gap-2 border-b border-border bg-muted px-3 py-2.5">
       <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold">Pull requests</div>
         <div className="truncate text-xs text-muted-foreground">
@@ -35,6 +41,7 @@ export function RepoHeader({
         <Button
           variant="ghost"
           size="icon"
+          className="border border-border bg-muted hover:bg-secondary"
           onClick={onOpenOverview}
           aria-label="Open overview dashboard"
           title="Overview"
@@ -46,6 +53,7 @@ export function RepoHeader({
         <Button
           variant="ghost"
           size="icon"
+          className="border border-border bg-muted hover:bg-secondary"
           onClick={onToggleCollapseAll}
           aria-label={allCollapsed ? "Expand all repositories" : "Collapse all repositories"}
           title={allCollapsed ? "Expand all" : "Collapse all"}
@@ -56,6 +64,7 @@ export function RepoHeader({
       <Button
         variant="ghost"
         size="icon"
+        className="border border-border bg-muted hover:bg-secondary"
         onClick={onRefresh}
         aria-label="Refresh pull requests"
         title="Refresh"
@@ -65,6 +74,7 @@ export function RepoHeader({
       <Button
         variant="ghost"
         size="icon"
+        className="border border-border bg-muted hover:bg-secondary"
         onClick={onOpenSettings}
         aria-label="Open settings"
         title="Settings"

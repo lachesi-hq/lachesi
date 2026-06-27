@@ -1,5 +1,41 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Geist Variable";
+  src: url("../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2")
+    format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Variable";
+  src: url("../node_modules/@fontsource-variable/geist/files/geist-latin-wght-italic.woff2")
+    format("woff2-variations");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono Variable";
+  src: url("../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2")
+    format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono Variable";
+  src: url("../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-italic.woff2")
+    format("woff2-variations");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* ----------------------------------------------------------------------------
@@ -13,8 +49,8 @@
   --card-foreground: #1f2328;
   --popover: #ffffff;
   --popover-foreground: #1f2328;
-  --primary: #1f6feb;
-  --primary-foreground: #ffffff;
+  --primary: #ffffff;
+  --primary-foreground: #0d0d0d;
   --secondary: #f6f8fa;
   --secondary-foreground: #1f2328;
   --muted: #f6f8fa;
@@ -59,49 +95,49 @@
 }
 
 [data-theme="dark"] {
-  --background: #0d1117;
-  --foreground: #e6edf3;
-  --card: #0d1117;
-  --card-foreground: #e6edf3;
-  --popover: #161b22;
-  --popover-foreground: #e6edf3;
-  --primary: #2f81f7;
-  --primary-foreground: #ffffff;
-  --secondary: #161b22;
-  --secondary-foreground: #e6edf3;
-  --muted: #161b22;
-  --muted-foreground: #9198a1;
-  --accent: #121d2f;
-  --accent-foreground: #58a6ff;
+  --background: #0d0d0d;
+  --foreground: #e0e0e0;
+  --card: #141414;
+  --card-foreground: #e0e0e0;
+  --popover: #1a1a1a;
+  --popover-foreground: #e0e0e0;
+  --primary: #ffffff;
+  --primary-foreground: #0d0d0d;
+  --secondary: #141414;
+  --secondary-foreground: #ffffff;
+  --muted: #1a1a1a;
+  --muted-foreground: #777777;
+  --accent: #1a1a1a;
+  --accent-foreground: #ffffff;
   --destructive: #f85149;
   --destructive-foreground: #ffffff;
   --success: #3fb950;
   --warning: #d29922;
-  --border: #30363d;
-  --input: #30363d;
+  --border: #2a2a2a;
+  --input: #2a2a2a;
   --ring: #2f81f7;
 
-  --sidebar: #0d1117;
-  --sidebar-foreground: #e6edf3;
+  --sidebar: #141414;
+  --sidebar-foreground: #e0e0e0;
 
   --diff-add-bg: #12261e;
   --diff-add-gutter: #1f572f;
   --diff-del-bg: #25171c;
   --diff-del-gutter: #6e1c24;
-  --diff-hunk-bg: #161b22;
+  --diff-hunk-bg: #141414;
   --diff-word-add: #2ea04366;
   --diff-word-del: #f8514966;
 
-  --toolbar-bg: #0f141b;
-  --toolbar-line: #1c1f24;
-  --toolbar-line-strong: #2f363d;
-  --toolbar-icon: #565b64;
-  --toolbar-ink: #e6edf3;
-  --toolbar-hover-bg: #161b22;
-  --toolbar-active-bg: rgba(97, 175, 239, 0.12);
-  --toolbar-active-ink: #d7e8ff;
-  --toolbar-accent: #61afef;
-  --toolbar-tooltip-bg: #171b23;
+  --toolbar-bg: #141414;
+  --toolbar-line: #2a2a2a;
+  --toolbar-line-strong: #2a2a2a;
+  --toolbar-icon: #777777;
+  --toolbar-ink: #ffffff;
+  --toolbar-hover-bg: #1a1a1a;
+  --toolbar-active-bg: #1f1f1f;
+  --toolbar-active-ink: #ffffff;
+  --toolbar-accent: #2a2a2a;
+  --toolbar-tooltip-bg: #1a1a1a;
 }
 
 @theme inline {
@@ -132,11 +168,31 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
 
-  --font-mono: "SFMono-Regular", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+    Helvetica, Arial, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 * {
   border-color: var(--border);
+}
+
+button,
+[role="button"],
+a,
+summary,
+label,
+select,
+input[type="checkbox"],
+input[type="radio"] {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"],
+select:disabled,
+input:disabled {
+  cursor: not-allowed;
 }
 
 html,
@@ -149,8 +205,7 @@ body {
   margin: 0;
   background-color: var(--background);
   color: var(--foreground);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -166,7 +221,7 @@ body {
   border-top: 1px solid var(--toolbar-line);
   background: var(--toolbar-bg);
   flex-shrink: 0;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   overflow: visible;
 }
 
@@ -205,7 +260,6 @@ body {
 .toolbar-toggle[data-active="true"] {
   background: var(--toolbar-active-bg);
   color: var(--toolbar-active-ink);
-  box-shadow: inset 0 -1px 0 var(--toolbar-accent);
 }
 
 .toolbar-toggle:disabled {

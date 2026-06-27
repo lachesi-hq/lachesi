@@ -11,6 +11,7 @@ export function ThemeToggle({ theme, onToggle }: ThemeToggleProps) {
     <Button
       variant="ghost"
       size="icon"
+      className="border border-border bg-muted hover:bg-secondary"
       onClick={onToggle}
       aria-label="Toggle color theme"
       title={theme === "dark" ? "Switch to light" : "Switch to dark"}

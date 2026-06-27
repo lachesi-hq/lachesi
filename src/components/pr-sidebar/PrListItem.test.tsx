@@ -7,11 +7,11 @@ import { PrListItem } from "./PrListItem";
 const [pr] = clonePullRequests();
 
 describe("PrListItem", () => {
-  it("renders the PR id, title and author", () => {
+  it("renders the PR id, title and author avatar", () => {
     render(<PrListItem pr={pr} active={false} onSelect={() => {}} />);
     expect(screen.getByText(`#${pr.id}`)).toBeInTheDocument();
     expect(screen.getByText(pr.title)).toBeInTheDocument();
-    expect(screen.getByText(pr.authorDisplayName)).toBeInTheDocument();
+    expect(screen.getByLabelText(pr.authorDisplayName)).toBeInTheDocument();
   });
 
   it("calls onSelect with the PR when clicked", async () => {
