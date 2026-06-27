@@ -1,49 +1,251 @@
 # Lachesi
 
-A GitHub-feeling **Bitbucket pull request review** desktop app, built with Tauri v2 + React 19.
+Lachesi is an open-source, local-first review workspace for Bitbucket pull requests.
+It combines a GitHub-style desktop review UI with AI-assisted review runs, structured findings,
+local evidence, and reviewer-controlled publication back to Bitbucket.
 
-Named after Lachesis, the Moira (Fate) who *measures the thread* — here, measuring and reviewing
-code. Browse pull requests, read clean GitHub-style diffs, leave per-line (inline) comments, and
-publish them to Bitbucket via the REST API.
+The name comes from Lachesis, the Moira who measures the thread. Lachesi measures the thread of a
+change: the PR metadata, diff, linked context, local repository state, review findings, and the
+comments a human reviewer decides to publish.
+
+## What It Is
+
+Bitbucket is the source of truth for pull requests. Lachesi is the local review surface around it.
+
+Today it is a Tauri desktop app that can:
+
+- track multiple Bitbucket Cloud repositories in one sidebar;
+- browse open, draft, merged, and declined pull requests;
+- render readable unified or split diffs with syntax highlighting and diff stats;
+- show PR metadata, reviewers, approvals, branch age/status, and existing comments;
+- stage inline or general review comments locally before publishing them to Bitbucket;
+- approve PRs through the Bitbucket API;
+- run AI review flows with Claude, persist review threads, and continue the conversation;
+- turn AI review output into structured findings and draft comments;
+- run local fix, commit, push, branch sync, and conflict-resolution workflows from a configured clone;
+- enrich review context with Jira issues and Notion pages when credentials are configured;
+- store review history, review jobs, run logs, findings, evidence, and publication state locally.
+
+The long-term direction is a local/open-source CodeRabbit-style review engine for Bitbucket: desktop
+first, but with shared review contracts that can power a future CLI, CI usage, policy checks, and
+documentation site.
 
 ## Why
 
-Bitbucket's web review UI is hard to read coming from GitHub. Lachesi gives a familiar,
-keyboard-friendly review surface for Bitbucket Cloud repositories.
+Bitbucket's web review UI can feel cramped and noisy for reviewers used to GitHub. More importantly,
+modern review work is no longer just "read a diff and leave comments". A good reviewer often needs
+to inspect local branches, run deterministic checks, read linked tickets/docs, ask an AI assistant for
+a second pass, curate the useful findings, and decide what to publish.
 
-## Stack
+Lachesi keeps that workflow local and explicit:
 
-- **Tauri v2** (Rust) — all Bitbucket HTTP lives in Rust (`reqwest`), keeping the API token out of
-  the webview and sidestepping CORS.
-- **React 19 + TypeScript + Vite** frontend.
-- **Tailwind v4** + CSS variables (light/dark), shadcn-style primitives, Phosphor icons.
-- **Biome** (lint + format), **Vitest** + Testing Library, **Storybook 10**.
+- credentials stay out of the webview;
+- AI output is treated as draft review material, not automatic remote feedback;
+- Bitbucket writes require reviewer action;
+- repo-specific rules live near the code through `.lachesi.yaml`;
+- review output is moving toward a structured schema instead of free-form chat only.
+
+## Current Product Surface
+
+### Pull Request Review
+
+- Multi-repository PR list with repository and author filters.
+- Open, draft, merged, and declined PR states.
+- PR detail header with branches, reviewers, approvals, and branch status.
+- Unified and split diff modes powered by parsed Bitbucket diffs.
+- File-level diff stats and changed-file navigation primitives.
+- Existing Bitbucket comments and local draft comments rendered in context.
+- Local pending-review bar for staged comments, with publish/discard controls.
+
+### AI Review Workspace
+
+- Claude-backed review runs from the active PR.
+- Replyable review threads persisted per PR.
+- Review run state, logs, cancellation, success/failure tracking, and review history.
+- Structured `ReviewRun`, `ReviewFinding`, and `ReviewEvidenceArtifact` models layered alongside
+  the conversational thread.
+- Finding publication tracking for staged drafts and published Bitbucket comments.
+- `Fix with Claude` workflow that operates against the local clone and can progress through fix,
+  verification, commit, and push phases.
+
+### Local Repository Integration
+
+Each tracked Bitbucket repository can point to a local clone. That enables:
+
+- branch status checks;
+- branch checkout/fetch/pull utilities;
+- PR branch synchronization;
+- conflict-resolution assistance;
+- AI fix execution in the worktree;
+- commit and push steps controlled by the reviewer.
+
+### Context Integrations
+
+- Jira issue extraction from PR context, using an Atlassian site URL and Jira token.
+- Notion page extraction from linked Jira content, using a Notion token.
+- Manual and detected review references that can be sent with the review prompt.
+
+### Local Storage And Secrets
+
+- Bitbucket, Jira, and Notion credentials are stored through the local credentials layer.
+- Non-secret app settings are stored as JSON in the OS config directory.
+- AI review stores and background review jobs are stored in a local SQLite database.
+- Legacy JSON review storage is migrated into SQLite when read.
+- `LACHESI_DRY_RUN=1` can exercise comment flows without posting to Bitbucket.
+
+## Repo-Owned Review Config
+
+Lachesi can read `.lachesi.yaml` from a configured local repository. The current schema already
+models the direction of the review engine:
+
+```yaml
+version: "0.1"
+review:
+  mode: balanced
+  prompt:
+    extend: "Pay special attention to migration safety and public API changes."
+  findings:
+    minSeverity: low
+    requireAnchors: false
+paths:
+  include:
+    - "src/**"
+  exclude:
+    - "dist/**"
+policy:
+  rules:
+    - id: no-cross-module-imports
+      severity: medium
+      instruction: "Flag imports that cross module ownership boundaries."
+analyzers:
+  tsc:
+    enabled: true
+    command: "pnpm typecheck"
+    timeoutSeconds: 120
+publish:
+  defaultMode: inline
+  requireManualSubmit: true
+```
+
+Some of this is already used for prompt/config loading; some is intentionally documented as the
+contract for the next review-engine milestones.
 
 ## Architecture
 
-- No router — a discriminated-union `AppSelection` state drives the views (sidebar → PR → settings).
-- No external state lib — React hooks + IPC; Rust is the source of truth.
-- All IPC goes through `src/lib/tauri.ts` (`tauriCall`), which routes to a mock layer
-  (`src/mock-tauri/`) when running outside Tauri (browser dev, Storybook, Vitest).
+Lachesi is split across a React frontend and a Rust/Tauri backend.
 
-## Scripts
+- **Frontend:** React 19, TypeScript, Vite, Tailwind v4, shadcn-style primitives, Radix components,
+  Phosphor icons, Geist fonts.
+- **Desktop shell:** Tauri v2.
+- **Bitbucket access:** Rust `reqwest` commands behind Tauri IPC. Tokens never need to enter the
+  browser webview.
+- **State model:** React hooks plus Tauri commands; no external frontend state library.
+- **IPC boundary:** frontend calls go through `src/lib/tauri.ts`, which can route to mock handlers
+  for browser dev, Storybook, and Vitest.
+- **Diff rendering:** `gitdiff-parser`, `react-diff-view`, `react-virtuoso`, and `refractor`.
+- **Persistence:** OS config JSON for settings, local credentials storage for secrets, SQLite for
+  review stores/jobs.
+- **Review model:** structured findings, evidence, publication state, and chat threads share the
+  same TypeScript/Rust DTO vocabulary.
 
-| Command | Description |
-| --- | --- |
-| `pnpm dev` | Vite dev server (browser, mock IPC) on port 5210 |
-| `pnpm tauri dev` | Run the desktop app |
-| `pnpm storybook` | Component workbench |
-| `pnpm test` | Vitest unit/component tests |
-| `pnpm lint` | Biome check |
-| `pnpm build` | Type-check + production build |
+Useful design notes live in:
 
-## Auth
+- `docs/adr/0001-http-in-rust.md`
+- `docs/adr/0002-credentials-keychain.md`
+- `docs/adr/0003-diff-rendering.md`
+- `docs/specs/0001-findings-schema.md`
+- `docs/specs/0002-bitbucket-publication-model.md`
+- `docs/specs/0003-repository-config.md`
+- `docs/specs/0004-policy-engine.md`
+- `docs/specs/0005-local-evidence-pipeline.md`
+- `docs/specs/0006-cli-headless-review.md`
 
-Bitbucket Cloud uses **HTTP Basic** auth with an Atlassian account email + API token
-(`ATATT…`). Credentials are stored in the macOS Keychain (with an `.env` fallback for dev);
-non-secret config (workspace/repo/prefs) lives in a settings file.
+## Development
+
+### Requirements
+
+- Node.js and pnpm
+- Rust toolchain
+- Tauri v2 prerequisites for your OS
+- Bitbucket Cloud account email and API token for real API usage
+- Claude CLI available locally for AI review/fix flows
+
+### Install
+
+```sh
+pnpm install
+```
+
+### Run
+
+```sh
+pnpm dev
+```
+
+Runs the Vite app in browser mode with mock IPC on port `5210`.
+
+```sh
+pnpm tauri dev
+```
+
+Runs the desktop app against the Tauri backend.
+
+### Test And Build
+
+```sh
+pnpm test
+pnpm lint
+pnpm build
+pnpm storybook
+```
+
+`pnpm build` runs TypeScript and Vite production build. `pnpm lint` runs Biome.
+
+## Configuration
+
+In the app settings, configure:
+
+- one or more Bitbucket `workspace` / `repository` pairs;
+- optional local clone paths for branch, fix, commit, push, and sync workflows;
+- Atlassian email and Bitbucket API token;
+- default diff view;
+- Claude model and effort;
+- preferred terminal for review/fix launches;
+- optional Jira base URL, Jira token, and Notion token;
+- menu-bar sync and desktop notifications.
+
+For development, `.env` fallbacks may be used by local code paths, but secrets should not be
+committed. See `SECURITY.md`.
 
 ## Roadmap
 
-Tracked as GitHub issues (labels `P0`–`P3`, phases `M0`–`M6`). M0 = skeleton; M1 = auth;
-M2 = PR browsing; M3 = diff viewing; M4 = read comments; M5 = compose + publish; M6 = polish.
+The public roadmap is tracked in GitHub issues. The current open direction is:
+
+- [#1](https://github.com/lachesi-hq/lachesi/issues/1) implement an enforceable `.lachesi.yaml`
+  policy engine;
+- [#2](https://github.com/lachesi-hq/lachesi/issues/2) add local review learnings from reviewer
+  feedback;
+- [#3](https://github.com/lachesi-hq/lachesi/issues/3) implement a headless `lachesi review` CLI;
+- [#4](https://github.com/lachesi-hq/lachesi/issues/4) generate PR summaries and walkthroughs;
+- [#5](https://github.com/lachesi-hq/lachesi/issues/5) add targeted finishing-touch AI actions;
+- [#6](https://github.com/lachesi-hq/lachesi/issues/6) create the public Astro website and docs;
+- [#7](https://github.com/lachesi-hq/lachesi/issues/7) support Codex as an AI review provider;
+- [#8](https://github.com/lachesi-hq/lachesi/issues/8) add a changed-files tree view.
+
+## Project Status
+
+Lachesi is early and moving quickly. The desktop review workflow is usable, but the structured
+review engine is still being hardened. Expect API/schema changes while the project converges on the
+v0.1 contracts described in `docs/specs`.
+
+## Security
+
+Do not open public issues for credential exposure, private repository data, or local path leaks.
+Report vulnerabilities privately through GitHub Security Advisories when available.
+
+Credentials and tokens must stay in the OS credentials store or local environment, never in repo
+config, examples, screenshots, or fixtures.
+
+## License
+
+Lachesi is released under the license in `LICENSE`.
