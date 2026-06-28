@@ -70,13 +70,15 @@ let mockReviewJobs: AiReviewJob[] = [
 ];
 
 const mockRepositoryFiles: RepositoryFileEntry[] = [
-  { path: "src/App.tsx" },
-  { path: "src/components/orders/OrderTable.tsx" },
-  { path: "src/components/orders/OrderDetails.tsx" },
-  { path: "src/lib/api.ts" },
-  { path: "src/lib/format.ts" },
-  { path: "package.json" },
-  { path: "README.md" },
+  { path: "src/App.tsx", status: "modified" },
+  { path: "src/components/orders/OrderTable.tsx", status: "unchanged" },
+  { path: "src/components/orders/OrderDetails.tsx", status: "unchanged" },
+  { path: "src/lib/api.ts", status: "unchanged" },
+  { path: "src/lib/format.ts", status: "added" },
+  { path: "src/lib/localDraft.ts", status: "untracked" },
+  { path: "src/lib/legacy.ts", status: "deleted" },
+  { path: "package.json", status: "unchanged" },
+  { path: "README.md", status: "unchanged" },
 ];
 
 const mockRepositoryFileContents: Record<string, string> = {
@@ -112,6 +114,8 @@ export function App() {
     currency: "USD",
   }).format(value);
 }
+`,
+  "src/lib/localDraft.ts": `export const localDraft = true;
 `,
   "package.json": `{
   "name": "frontend-app",

@@ -20,7 +20,18 @@ describe("RepositoryExplorerPanel", () => {
     await waitFor(() => {
       expect(within(fileTree).getByRole("button", { name: /App\.tsx/ })).toBeInTheDocument();
     });
-    expect(screen.getByText("7 files")).toBeInTheDocument();
+    expect(screen.getByText("9 files")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "4 changed" })).toBeInTheDocument();
+    expect(within(fileTree).getByTitle("Modified")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "4 changed" }));
+
+    expect(within(fileTree).getByRole("button", { name: /localDraft\.ts/ })).toBeInTheDocument();
+    expect(
+      within(fileTree).queryByRole("button", { name: /OrderTable\.tsx/ }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "4 changed" }));
 
     await user.type(screen.getByRole("searchbox", { name: "Search repository files" }), "format");
 
