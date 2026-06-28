@@ -5,7 +5,7 @@ use std::process::Command;
 use serde::Serialize;
 
 use crate::config;
-use crate::local_repo::{configured_repo_path, git_origin_matches};
+use crate::local_repo::{configured_repo_path, find_in_path, git_origin_matches};
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -494,6 +494,72 @@ fn attach_commit_messages(
     Ok(())
 }
 
+fn editor_file_arg(file_path: &Path, line: Option<u32>, include_column: bool) -> String {
+    let path = file_path.to_string_lossy();
+    match line.filter(|line| *line > 0) {
+        Some(line) if include_column => format!("{path}:{line}:1"),
+        Some(line) => format!("{path}:{line}"),
+        None => path.to_string(),
+    }
+}
+
+fn external_editor_command(file_path: &Path, line: Option<u32>) -> Option<(PathBuf, Vec<String>)> {
+    if let Some(zed) = find_in_path("zed") {
+        return Some((zed, vec![editor_file_arg(file_path, line, true)]));
+    }
+    if let Some(cursor) = find_in_path("cursor") {
+        return Some((
+            cursor,
+            vec!["-g".to_string(), editor_file_arg(file_path, line, false)],
+        ));
+    }
+    if let Some(code) = find_in_path("code") {
+        return Some((
+            code,
+            vec!["-g".to_string(), editor_file_arg(file_path, line, false)],
+        ));
+    }
+    None
+}
+
+fn spawn_command(program: &Path, args: &[String]) -> Result<(), String> {
+    Command::new(program)
+        .args(args)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Failed to open external editor: {e}"))
+}
+
+fn open_with_system(file_path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        return Command::new("/usr/bin/open")
+            .arg(file_path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Failed to open file: {e}"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let file_path = file_path.to_string_lossy().to_string();
+        return Command::new("cmd")
+            .args(["/C", "start", "", &file_path])
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Failed to open file: {e}"));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(file_path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Failed to open file: {e}"))
+    }
+}
+
 fn fetch_repo(repo_path: &Path) -> Result<(), String> {
     run_git_checked(repo_path, &["fetch", "--prune", "origin"])?;
     Ok(())
@@ -599,6 +665,27 @@ pub fn get_repository_file_blame(
 }
 
 #[tauri::command]
+pub fn open_repository_file_external(
+    workspace: String,
+    repo: String,
+    path: String,
+    line: Option<u32>,
+) -> Result<(), String> {
+    let repo_path = configured_repo(&workspace, &repo)?;
+    let file_path = safe_repo_file_path(&repo_path, &path)?;
+    let metadata = fs::metadata(&file_path).map_err(|e| format!("Failed to read file: {e}"))?;
+    if !metadata.is_file() {
+        return Err("Repository path is not a file.".to_string());
+    }
+
+    if let Some((program, args)) = external_editor_command(&file_path, line) {
+        return spawn_command(&program, &args);
+    }
+
+    open_with_system(&file_path)
+}
+
+#[tauri::command]
 pub fn checkout_repository_branch(
     workspace: String,
     repo: String,
@@ -628,9 +715,11 @@ pub fn pull_repository(workspace: String, repo: String) -> Result<RepositoryWork
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{
-        GIT_SHOW_MESSAGE_MARKER, local_branch_for_remote, parse_commit_messages,
-        parse_git_blame_line_porcelain, validate_repo_relative_path,
+        editor_file_arg, local_branch_for_remote, parse_commit_messages,
+        parse_git_blame_line_porcelain, validate_repo_relative_path, GIT_SHOW_MESSAGE_MARKER,
     };
 
     #[test]
@@ -700,6 +789,24 @@ filename src/lib/format.ts
                 "Add formatter\n\nUse shared formatting.".to_string(),
                 "Fix locale copy\n\nKeep labels concise.".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn builds_external_editor_file_position_argument() {
+        let file_path = Path::new("/tmp/project/src/App.tsx");
+
+        assert_eq!(
+            editor_file_arg(file_path, Some(42), true),
+            "/tmp/project/src/App.tsx:42:1"
+        );
+        assert_eq!(
+            editor_file_arg(file_path, Some(42), false),
+            "/tmp/project/src/App.tsx:42"
+        );
+        assert_eq!(
+            editor_file_arg(file_path, None, true),
+            "/tmp/project/src/App.tsx"
         );
     }
 }

@@ -597,6 +597,13 @@ export const mockHandlers: Record<string, Handler> = {
     }
     return mockBlameForPath(path);
   },
+  open_repository_file_external: (args) => {
+    const path = String(args?.path ?? "");
+    if (mockRepositoryFileContents[path] == null) {
+      throw new Error(`Mock file not found: ${path}`);
+    }
+    return null;
+  },
   checkout_repository_branch: (args) => ({
     workspace: String(args?.workspace ?? "example-workspace"),
     repo: String(args?.repo ?? "frontend-app"),

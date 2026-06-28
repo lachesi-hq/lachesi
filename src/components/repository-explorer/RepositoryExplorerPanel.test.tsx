@@ -33,6 +33,9 @@ describe("RepositoryExplorerPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/formatCurrency/)).toBeInTheDocument();
     });
+
+    await user.click(screen.getByRole("button", { name: "Open file in external editor" }));
+    expect(screen.queryByText(/Mock file not found/)).not.toBeInTheDocument();
   });
 
   it("collapses and expands folders from the tree", async () => {
