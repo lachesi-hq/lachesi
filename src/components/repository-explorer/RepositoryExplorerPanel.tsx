@@ -127,6 +127,14 @@ function formatBlameTime(authorTime: number | null): string | null {
   });
 }
 
+function bitbucketCommitUrl(workspace: string, repo: string, sha: string): string {
+  return `https://bitbucket.org/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(sha)}`;
+}
+
+function isRealCommitSha(sha: string): boolean {
+  return !/^0+$/.test(sha);
+}
+
 interface RepositoryTreeRowsProps {
   nodes: TreeNode[];
   level: number;
@@ -201,6 +209,8 @@ function RepositoryTreeRows({
 
 function RepositoryCodeViewer({
   file,
+  workspace,
+  repo,
   selectedLine,
   selectedBlame,
   blameLoading,
@@ -208,6 +218,8 @@ function RepositoryCodeViewer({
   onSelectLine,
 }: {
   file: RepositoryFileContent | null;
+  workspace: string;
+  repo: string;
   selectedLine: number | null;
   selectedBlame: RepositoryBlameLine | null;
   blameLoading: boolean;
@@ -246,6 +258,10 @@ function RepositoryCodeViewer({
           const active = selectedLine === lineNumber;
           const highlighted = highlightedLines[index];
           const blameTime = active ? formatBlameTime(selectedBlame?.authorTime ?? null) : null;
+          const commitUrl =
+            active && selectedBlame && isRealCommitSha(selectedBlame.sha)
+              ? bitbucketCommitUrl(workspace, repo, selectedBlame.sha)
+              : null;
           return (
             <div key={`${file.path}:${lineNumber}`} data-line={lineNumber}>
               <button
@@ -271,7 +287,18 @@ function RepositoryCodeViewer({
                         {selectedBlame.author ?? "Unknown author"}
                       </span>
                       {blameTime && <span>{blameTime}</span>}
-                      <span className="font-mono">{selectedBlame.shortSha}</span>
+                      {commitUrl ? (
+                        <a
+                          href={commitUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-mono text-foreground underline decoration-border underline-offset-2 hover:text-primary"
+                        >
+                          {selectedBlame.shortSha}
+                        </a>
+                      ) : (
+                        <span className="font-mono">{selectedBlame.shortSha}</span>
+                      )}
                       {selectedBlame.summary && (
                         <span className="min-w-0 truncate">{selectedBlame.summary}</span>
                       )}
@@ -433,6 +460,11 @@ export function RepositoryExplorerPanel({
 
   const handleSelectLine = (line: number) => {
     if (!selectedPath) return;
+    if (selectedLine === line) {
+      setSelectedLine(null);
+      onSelectFile?.(selectedPath, null);
+      return;
+    }
     setSelectedLine(line);
     loadBlameForPath(selectedPath);
     onSelectFile?.(selectedPath, line);
@@ -558,6 +590,8 @@ export function RepositoryExplorerPanel({
         ) : (
           <RepositoryCodeViewer
             file={content}
+            workspace={workspace}
+            repo={repo}
             selectedLine={selectedLine}
             selectedBlame={selectedBlame}
             blameLoading={blameLoading}

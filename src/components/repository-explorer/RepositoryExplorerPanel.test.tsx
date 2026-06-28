@@ -84,13 +84,23 @@ describe("RepositoryExplorerPanel", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Select line 4" }));
+    const lineButton = await screen.findByRole("button", { name: "Select line 4" });
+    await user.click(lineButton);
 
     expect(onSelectFile).toHaveBeenCalledWith("src/App.tsx", 4);
     await waitFor(() => {
       expect(screen.getByText("Grace Hopper")).toBeInTheDocument();
     });
     expect(screen.getByText("6f52c9a1")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "6f52c9a1" })).toHaveAttribute(
+      "href",
+      "https://bitbucket.org/example-workspace/frontend-app/commits/6f52c9a1cf5cd075762f13d0b0f8bf8d0f4f3f7d",
+    );
     expect(screen.getByText("Update fixture file")).toBeInTheDocument();
+
+    await user.click(lineButton);
+
+    expect(onSelectFile).toHaveBeenLastCalledWith("src/App.tsx", null);
+    expect(screen.queryByText("Grace Hopper")).not.toBeInTheDocument();
   });
 });
