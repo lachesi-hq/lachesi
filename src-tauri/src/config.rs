@@ -26,6 +26,14 @@ pub enum ReviewTerminal {
     Terminal,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AiProvider {
+    #[default]
+    Claude,
+    Codex,
+}
+
 /// Non-secret application configuration, persisted as JSON in the OS config dir.
 /// Secrets (username/token) live in the keychain — see `credentials`.
 #[derive(Serialize, Deserialize, Clone)]
@@ -38,9 +46,15 @@ pub struct AppConfig {
     #[serde(default)]
     pub review_terminal: Option<ReviewTerminal>,
     #[serde(default)]
+    pub ai_provider: AiProvider,
+    #[serde(default)]
     pub claude_model: Option<String>,
     #[serde(default)]
     pub claude_effort: Option<String>,
+    #[serde(default)]
+    pub codex_model: Option<String>,
+    #[serde(default)]
+    pub codex_effort: Option<String>,
     /// Jira site base URL for issue links, e.g. https://example.atlassian.net
     #[serde(default)]
     pub jira_base_url: Option<String>,
@@ -72,8 +86,11 @@ impl Default for AppConfig {
             default_diff_view: "unified".to_string(),
             theme: "dark".to_string(),
             review_terminal: None,
+            ai_provider: AiProvider::Claude,
             claude_model: None,
             claude_effort: None,
+            codex_model: None,
+            codex_effort: None,
             jira_base_url: None,
             menu_bar_sync_enabled: true,
             notifications_enabled: false,
@@ -134,4 +151,29 @@ pub fn save(cfg: &AppConfig) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
     fs::write(dir.join(CONFIG_FILE), json).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AiProvider, AppConfig};
+
+    #[test]
+    fn serializes_codex_provider_settings_in_local_config_shape() {
+        let config = AppConfig {
+            ai_provider: AiProvider::Codex,
+            codex_model: Some("gpt-5-codex".to_string()),
+            codex_effort: Some("high".to_string()),
+            ..AppConfig::default()
+        };
+
+        let json = serde_json::to_string(&config).expect("config should serialize");
+        assert!(json.contains(r#""aiProvider":"codex""#));
+        assert!(json.contains(r#""codexModel":"gpt-5-codex""#));
+        assert!(json.contains(r#""codexEffort":"high""#));
+
+        let parsed: AppConfig = serde_json::from_str(&json).expect("config should deserialize");
+        assert_eq!(parsed.ai_provider, AiProvider::Codex);
+        assert_eq!(parsed.codex_model.as_deref(), Some("gpt-5-codex"));
+        assert_eq!(parsed.codex_effort.as_deref(), Some("high"));
+    }
 }

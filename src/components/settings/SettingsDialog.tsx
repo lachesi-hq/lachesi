@@ -22,8 +22,10 @@ import { Label } from "@/components/ui/label";
 import type { ConnectionUser } from "@/hooks/useCredentials";
 import { cn } from "@/lib/utils";
 import type {
+  AiProvider,
   ClaudeReviewEffort,
   ClaudeReviewModel,
+  CodexReviewEffort,
   DiffViewMode,
   RepoRef,
   ReviewTerminal,
@@ -44,8 +46,11 @@ export interface SettingsSaveInput {
   repos: RepoRef[];
   defaultDiffView: DiffViewMode;
   reviewTerminal: ReviewTerminal | null;
+  aiProvider: AiProvider;
   claudeModel: ClaudeReviewModel | null;
   claudeEffort: ClaudeReviewEffort | null;
+  codexModel: string | null;
+  codexEffort: CodexReviewEffort | null;
   jiraBaseUrl: string | null;
   menuBarSyncEnabled: boolean;
   notificationsEnabled: boolean;
@@ -59,8 +64,11 @@ export interface SettingsFormProps {
   repos: RepoRef[];
   defaultDiffView: DiffViewMode;
   reviewTerminal: ReviewTerminal | null;
+  aiProvider: AiProvider;
   claudeModel: ClaudeReviewModel | null;
   claudeEffort: ClaudeReviewEffort | null;
+  codexModel: string | null;
+  codexEffort: CodexReviewEffort | null;
   reviewTerminalOptions: ReviewTerminalOption[];
   jiraBaseUrl: string | null;
   menuBarSyncEnabled: boolean;
@@ -88,8 +96,11 @@ function SettingsForm({
   repos: initialRepos,
   defaultDiffView: initialDiffView,
   reviewTerminal: initialReviewTerminal,
+  aiProvider: initialAiProvider,
   claudeModel: initialClaudeModel,
   claudeEffort: initialClaudeEffort,
+  codexModel: initialCodexModel,
+  codexEffort: initialCodexEffort,
   reviewTerminalOptions,
   jiraBaseUrl: initialJiraBaseUrl,
   menuBarSyncEnabled: initialMenuBarSyncEnabled,
@@ -112,8 +123,11 @@ function SettingsForm({
   const [reviewTerminal, setReviewTerminal] = useState<ReviewTerminal | null>(
     initialReviewTerminal,
   );
+  const [aiProvider, setAiProvider] = useState<AiProvider>(initialAiProvider);
   const [claudeModel, setClaudeModel] = useState<ClaudeReviewModel | null>(initialClaudeModel);
   const [claudeEffort, setClaudeEffort] = useState<ClaudeReviewEffort | null>(initialClaudeEffort);
+  const [codexModel, setCodexModel] = useState(initialCodexModel ?? "");
+  const [codexEffort, setCodexEffort] = useState<CodexReviewEffort | null>(initialCodexEffort);
   const [jiraBaseUrl, setJiraBaseUrl] = useState(initialJiraBaseUrl ?? "");
   const [menuBarSyncEnabled, setMenuBarSyncEnabled] = useState(initialMenuBarSyncEnabled);
   const [notificationsEnabled, setNotificationsEnabled] = useState(initialNotificationsEnabled);
@@ -157,8 +171,11 @@ function SettingsForm({
         repos: cleaned,
         defaultDiffView: diffView,
         reviewTerminal,
+        aiProvider,
         claudeModel,
         claudeEffort,
+        codexModel: codexModel.trim() || null,
+        codexEffort,
         jiraBaseUrl: jiraBaseUrl.trim() || null,
         menuBarSyncEnabled,
         notificationsEnabled,
@@ -302,49 +319,99 @@ function SettingsForm({
         />
       </div>
 
-      <div className="grid gap-3 rounded-md border border-border p-3 md:grid-cols-2">
-        <div className="grid gap-1.5">
-          <Label htmlFor="settings-claude-model">Claude review model</Label>
+      <div className="grid gap-3 rounded-md border border-border p-3">
+        <div className="grid gap-1.5 md:max-w-xs">
+          <Label htmlFor="settings-ai-provider">AI review provider</Label>
           <select
-            id="settings-claude-model"
+            id="settings-ai-provider"
             className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            value={claudeModel ?? ""}
-            onChange={(event) =>
-              setClaudeModel((event.target.value || null) as ClaudeReviewModel | null)
-            }
+            value={aiProvider}
+            onChange={(event) => setAiProvider(event.target.value as AiProvider)}
           >
-            <option value="">Default</option>
-            <option value="sonnet">Sonnet</option>
-            <option value="opus">Opus</option>
-            <option value="fable">Fable</option>
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
           </select>
-          <p className="text-xs text-muted-foreground">
-            Passed to Claude Code as <span className="font-mono">--model</span> for inline AI
-            reviews.
-          </p>
         </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="settings-claude-effort">Claude review effort</Label>
-          <select
-            id="settings-claude-effort"
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            value={claudeEffort ?? ""}
-            onChange={(event) =>
-              setClaudeEffort((event.target.value || null) as ClaudeReviewEffort | null)
-            }
-          >
-            <option value="">Default</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="xhigh">XHigh</option>
-            <option value="max">Max</option>
-          </select>
-          <p className="text-xs text-muted-foreground">
-            Passed to Claude Code as <span className="font-mono">--effort</span> for inline AI
-            reviews.
-          </p>
-        </div>
+        {aiProvider === "claude" ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="settings-claude-model">Claude review model</Label>
+              <select
+                id="settings-claude-model"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                value={claudeModel ?? ""}
+                onChange={(event) =>
+                  setClaudeModel((event.target.value || null) as ClaudeReviewModel | null)
+                }
+              >
+                <option value="">Default</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+                <option value="fable">Fable</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Passed to Claude Code as <span className="font-mono">--model</span> for inline AI
+                reviews.
+              </p>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="settings-claude-effort">Claude review effort</Label>
+              <select
+                id="settings-claude-effort"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                value={claudeEffort ?? ""}
+                onChange={(event) =>
+                  setClaudeEffort((event.target.value || null) as ClaudeReviewEffort | null)
+                }
+              >
+                <option value="">Default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">XHigh</option>
+                <option value="max">Max</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Passed to Claude Code as <span className="font-mono">--effort</span> for inline AI
+                reviews.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="settings-codex-model">Codex review model</Label>
+              <Input
+                id="settings-codex-model"
+                value={codexModel}
+                onChange={(event) => setCodexModel(event.target.value)}
+                placeholder="Default"
+              />
+              <p className="text-xs text-muted-foreground">
+                Passed to Codex as <span className="font-mono">--model</span> when set.
+              </p>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="settings-codex-effort">Codex reasoning effort</Label>
+              <select
+                id="settings-codex-effort"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                value={codexEffort ?? ""}
+                onChange={(event) =>
+                  setCodexEffort((event.target.value || null) as CodexReviewEffort | null)
+                }
+              >
+                <option value="">Default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Passed to Codex as <span className="font-mono">model_reasoning_effort</span>.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-2 rounded-md border border-border p-3">
@@ -483,8 +550,11 @@ export function SettingsPage({ onBack, ...props }: SettingsPageProps) {
     props.repos.map((repo) => `${repo.workspace}/${repo.repo}/${repo.localPath ?? ""}`).join("|"),
     props.defaultDiffView,
     props.reviewTerminal ?? "",
+    props.aiProvider,
     props.claudeModel ?? "",
     props.claudeEffort ?? "",
+    props.codexModel ?? "",
+    props.codexEffort ?? "",
     props.jiraBaseUrl ?? "",
     props.menuBarSyncEnabled ? "menu-on" : "menu-off",
     props.notificationsEnabled ? "notifications-on" : "notifications-off",

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tauriCall } from "@/lib/tauri";
 import type {
+  AiProvider,
   AiReviewRunState,
   AiReviewStore,
   AiReviewThread,
   ClaudeReviewEffort,
   ClaudeReviewModel,
+  CodexReviewEffort,
   ReviewRun,
 } from "@/types";
 
@@ -15,8 +17,11 @@ interface StartReviewArgs {
   title: string;
   sourceBranch: string;
   destinationBranch: string;
+  aiProvider: AiProvider;
   claudeModel: ClaudeReviewModel | null;
   claudeEffort: ClaudeReviewEffort | null;
+  codexModel: string | null;
+  codexEffort: CodexReviewEffort | null;
 }
 
 interface ReplyReviewArgs {
@@ -26,8 +31,11 @@ interface ReplyReviewArgs {
   threadId: string;
   userMessage: string;
   basePayload: string;
+  aiProvider: AiProvider;
   claudeModel: ClaudeReviewModel | null;
   claudeEffort: ClaudeReviewEffort | null;
+  codexModel: string | null;
+  codexEffort: CodexReviewEffort | null;
 }
 
 interface UseAiReviewResult {
@@ -158,8 +166,11 @@ export function useAiReview(
       title,
       sourceBranch,
       destinationBranch,
+      aiProvider,
       claudeModel,
       claudeEffort,
+      codexModel,
+      codexEffort,
     }: StartReviewArgs) => {
       if (!workspace || !repo || prId == null) return;
       const key = `${workspace}/${repo}/${prId}`;
@@ -176,8 +187,11 @@ export function useAiReview(
           displayMessage,
           sourceBranch,
           destinationBranch,
+          aiProvider,
           claudeModel,
           claudeEffort,
+          codexModel,
+          codexEffort,
         });
         if (keyRef.current === key) {
           setState(result);
@@ -204,8 +218,11 @@ export function useAiReview(
       threadId,
       userMessage,
       basePayload,
+      aiProvider,
       claudeModel,
       claudeEffort,
+      codexModel,
+      codexEffort,
     }: ReplyReviewArgs) => {
       if (!workspace || !repo || prId == null) return;
       const key = `${workspace}/${repo}/${prId}`;
@@ -223,8 +240,11 @@ export function useAiReview(
           threadId,
           userMessage,
           basePayload,
+          aiProvider,
           claudeModel,
           claudeEffort,
+          codexModel,
+          codexEffort,
         });
         if (keyRef.current === key) {
           setState(result);

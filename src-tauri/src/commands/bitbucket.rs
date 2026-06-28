@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::Path;
 
-use crate::config::ReviewTerminal;
 use crate::config::{self, AppConfig, RepoRef};
+use crate::config::{AiProvider, ReviewTerminal};
 use crate::credentials::{self, Credentials};
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
 
@@ -576,8 +576,11 @@ pub fn save_config(
     default_diff_view: String,
     theme: String,
     review_terminal: Option<ReviewTerminal>,
+    ai_provider: AiProvider,
     claude_model: Option<String>,
     claude_effort: Option<String>,
+    codex_model: Option<String>,
+    codex_effort: Option<String>,
     jira_base_url: Option<String>,
     menu_bar_sync_enabled: bool,
     notifications_enabled: bool,
@@ -587,8 +590,11 @@ pub fn save_config(
         default_diff_view,
         theme,
         review_terminal,
+        ai_provider,
         claude_model,
         claude_effort,
+        codex_model,
+        codex_effort,
         jira_base_url,
         menu_bar_sync_enabled,
         notifications_enabled,

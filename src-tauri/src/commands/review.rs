@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use crate::config::AiProvider;
 use crate::local_repo::resolve_local_repo;
 use crate::repo_config;
 use crate::review_storage;
@@ -138,6 +139,7 @@ pub enum ReviewEvidenceKind {
 #[serde(rename_all = "kebab-case")]
 pub enum ReviewEvidenceSource {
     Claude,
+    Codex,
     BitbucketDiff,
     Jira,
     Notion,
@@ -1753,6 +1755,7 @@ fn materialize_review_run(
     finished_at: &str,
     snapshot_payload: &str,
     summary_markdown: &str,
+    assistant_evidence_source: ReviewEvidenceSource,
     analyzer_evidence: Vec<ReviewEvidenceArtifact>,
 ) -> Result<ReviewRun, String> {
     const REVIEW_SCHEMA_VERSION: &str = "v0.1";
@@ -1781,7 +1784,7 @@ fn materialize_review_run(
     let mut evidence = vec![ReviewEvidenceArtifact {
         id: conversation_evidence_id.clone(),
         kind: ReviewEvidenceKind::Conversation,
-        source: ReviewEvidenceSource::Claude,
+        source: assistant_evidence_source,
         title: "Assistant review output".to_string(),
         summary: Some("Canonical assistant markdown captured for this review turn.".to_string()),
         payload: Some(display_markdown.clone()),
@@ -2075,6 +2078,16 @@ fn begin_inline_review_run(
 }
 
 fn set_inline_review_pid(store: &AiReviewRunStore, key: &str, run_id: u64, pid: u32) {
+    set_inline_review_process_pid(store, key, run_id, pid, "Process");
+}
+
+fn set_inline_review_process_pid(
+    store: &AiReviewRunStore,
+    key: &str,
+    run_id: u64,
+    pid: u32,
+    provider_label: &str,
+) {
     with_review_run_store(store, |inner| {
         let Some(session) = inner.sessions.get_mut(key) else {
             return;
@@ -2086,7 +2099,7 @@ fn set_inline_review_pid(store: &AiReviewRunStore, key: &str, run_id: u64, pid: 
         session
             .public
             .logs
-            .push("Claude process started.".to_string());
+            .push(format!("{provider_label} process started."));
         trim_logs(&mut session.public.logs);
     });
 }
@@ -2181,6 +2194,7 @@ fn finish_inline_review_success(
     key: &str,
     run_id: u64,
     generated_at: String,
+    provider_label: &str,
 ) {
     with_review_run_store(store, |inner| {
         let Some(session) = inner.sessions.get_mut(key) else {
@@ -2197,7 +2211,7 @@ fn finish_inline_review_success(
         session
             .public
             .logs
-            .push("Claude finished successfully.".to_string());
+            .push(format!("{provider_label} finished successfully."));
         trim_logs(&mut session.public.logs);
         if inner.active_key.as_deref() == Some(key) {
             inner.active_key = None;
@@ -2754,18 +2768,19 @@ fn format_claude_stream_log_line(stream_name: &'static str, line: &str) -> Vec<S
     }
 }
 
-fn read_inline_review_stream<R: std::io::Read + Send + 'static>(
+fn read_inline_review_stream_with_formatter<R: std::io::Read + Send + 'static>(
     reader: R,
     store: AiReviewRunStore,
     key: String,
     run_id: u64,
     stream_name: &'static str,
     sink: Arc<Mutex<String>>,
+    formatter: fn(&'static str, &str) -> Vec<String>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut buf = String::new();
         for line in BufReader::new(reader).lines().map_while(Result::ok) {
-            for rendered in format_claude_stream_log_line(stream_name, &line) {
+            for rendered in formatter(stream_name, &line) {
                 append_inline_review_log(&store, &key, run_id, rendered);
             }
             buf.push_str(&line);
@@ -2777,12 +2792,79 @@ fn read_inline_review_stream<R: std::io::Read + Send + 'static>(
     })
 }
 
+fn read_inline_review_stream<R: std::io::Read + Send + 'static>(
+    reader: R,
+    store: AiReviewRunStore,
+    key: String,
+    run_id: u64,
+    stream_name: &'static str,
+    sink: Arc<Mutex<String>>,
+) -> thread::JoinHandle<()> {
+    read_inline_review_stream_with_formatter(
+        reader,
+        store,
+        key,
+        run_id,
+        stream_name,
+        sink,
+        format_claude_stream_log_line,
+    )
+}
+
+fn format_codex_stream_log_line(stream_name: &'static str, line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if stream_name == "stderr" {
+        return vec![format!("[stderr] {trimmed}")];
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return vec![format!("[stdout] {trimmed}")];
+    };
+    let event_type = value
+        .get("type")
+        .and_then(|value| value.as_str())
+        .or_else(|| value.get("event").and_then(|value| value.as_str()));
+    match event_type {
+        Some("assistant_message" | "message" | "agent_message") => {
+            vec!["Codex is drafting the review…".to_string()]
+        }
+        Some("task_started" | "turn_started") => vec!["Codex review started.".to_string()],
+        Some("task_complete" | "turn_complete" | "completed") => {
+            vec!["Codex produced a result.".to_string()]
+        }
+        Some("error") => vec!["Codex reported an error.".to_string()],
+        Some(other) => vec![format!("Codex event: {other}")],
+        None => Vec::new(),
+    }
+}
+
+fn read_codex_inline_review_stream<R: std::io::Read + Send + 'static>(
+    reader: R,
+    store: AiReviewRunStore,
+    key: String,
+    run_id: u64,
+    stream_name: &'static str,
+    sink: Arc<Mutex<String>>,
+) -> thread::JoinHandle<()> {
+    read_inline_review_stream_with_formatter(
+        reader,
+        store,
+        key,
+        run_id,
+        stream_name,
+        sink,
+        format_codex_stream_log_line,
+    )
+}
+
 fn kill_process(pid: u32) -> Result<(), String> {
     let output = Command::new("/bin/kill")
         .arg("-TERM")
         .arg(pid.to_string())
         .output()
-        .map_err(|e| format!("failed to send SIGTERM to Claude (pid {pid}): {e}"))?;
+        .map_err(|e| format!("failed to send SIGTERM to process (pid {pid}): {e}"))?;
     if output.status.success() {
         return Ok(());
     }
@@ -2791,7 +2873,7 @@ fn kill_process(pid: u32) -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "failed to cancel Claude (pid {pid})\nstderr: {}\nstdout: {}",
+        "failed to cancel process (pid {pid})\nstderr: {}\nstdout: {}",
         stderr.trim(),
         String::from_utf8_lossy(&output.stdout).trim()
     ))
@@ -2927,6 +3009,73 @@ fn normalize_claude_effort(value: &str) -> Option<&'static str> {
         "high" => Some("high"),
         "xhigh" => Some("xhigh"),
         "max" => Some("max"),
+        _ => None,
+    }
+}
+
+fn build_codex_text_command(
+    repo_path: Option<&Path>,
+    payload: &str,
+    codex_model: Option<&str>,
+    codex_effort: Option<&str>,
+) -> Result<(Command, PathBuf, PathBuf), String> {
+    let tmp_path = std::env::temp_dir().join(format!("lachesi-codex-review-turn-{}.md", now_ms()));
+    let output_path =
+        std::env::temp_dir().join(format!("lachesi-codex-review-output-{}.md", now_ms()));
+    fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
+
+    let model_arg = codex_model
+        .and_then(normalize_codex_model)
+        .map(|model| format!(" --model {}", shell_quote(&model)))
+        .unwrap_or_default();
+    let effort_arg = codex_effort
+        .and_then(normalize_codex_effort)
+        .map(|effort| {
+            format!(
+                " -c {}",
+                shell_quote(&format!("model_reasoning_effort={effort}"))
+            )
+        })
+        .unwrap_or_default();
+    let repo_arg = if repo_path.is_some() {
+        String::new()
+    } else {
+        " --skip-git-repo-check".to_string()
+    };
+    let shell_cmd = format!(
+        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; codex exec --sandbox read-only --ask-for-approval never --output-last-message {}{model_arg}{effort_arg}{repo_arg} - < {}",
+        shell_quote(&output_path.to_string_lossy()),
+        shell_quote(&tmp_path.to_string_lossy())
+    );
+    let mut command = Command::new("/bin/zsh");
+    command.arg("-lc").arg(shell_cmd);
+    if let Some(repo_path) = repo_path {
+        command.current_dir(repo_path);
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    Ok((command, tmp_path, output_path))
+}
+
+fn normalize_codex_model(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+fn normalize_codex_effort(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" => Some("high"),
         _ => None,
     }
 }
@@ -4104,9 +4253,20 @@ fn run_inline_review_pipeline(
     payload: String,
     resume_session_id: Option<String>,
     fallback_payload: Option<String>,
+    ai_provider: AiProvider,
     claude_model: Option<String>,
     claude_effort: Option<String>,
+    codex_model: Option<String>,
+    codex_effort: Option<String>,
 ) -> Result<(), String> {
+    let provider_label = match ai_provider {
+        AiProvider::Claude => "Claude",
+        AiProvider::Codex => "Codex",
+    };
+    let assistant_evidence_source = match ai_provider {
+        AiProvider::Claude => ReviewEvidenceSource::Claude,
+        AiProvider::Codex => ReviewEvidenceSource::Codex,
+    };
     let repo_path = resolve_local_repo(&workspace, &repo).ok();
     let mut analyzer_artifacts = Vec::new();
     let mut effective_payload = payload.clone();
@@ -4199,14 +4359,33 @@ fn run_inline_review_pipeline(
         }
     }
 
-    if let Some(model) = claude_model.as_deref().and_then(normalize_claude_model) {
-        append_inline_review_log(&store, &key, run_id, format!("Claude model: {model}"));
+    append_inline_review_log(
+        &store,
+        &key,
+        run_id,
+        format!("AI provider: {provider_label}"),
+    );
+    match ai_provider {
+        AiProvider::Claude => {
+            if let Some(model) = claude_model.as_deref().and_then(normalize_claude_model) {
+                append_inline_review_log(&store, &key, run_id, format!("Claude model: {model}"));
+            }
+            if let Some(effort) = claude_effort.as_deref().and_then(normalize_claude_effort) {
+                append_inline_review_log(&store, &key, run_id, format!("Claude effort: {effort}"));
+            }
+        }
+        AiProvider::Codex => {
+            if let Some(model) = codex_model.as_deref().and_then(normalize_codex_model) {
+                append_inline_review_log(&store, &key, run_id, format!("Codex model: {model}"));
+            }
+            if let Some(effort) = codex_effort.as_deref().and_then(normalize_codex_effort) {
+                append_inline_review_log(&store, &key, run_id, format!("Codex effort: {effort}"));
+            }
+        }
     }
-    if let Some(effort) = claude_effort.as_deref().and_then(normalize_claude_effort) {
-        append_inline_review_log(&store, &key, run_id, format!("Claude effort: {effort}"));
-    }
-    let attempt = |prompt: &str,
-                   resume_id: Option<&str>|
+
+    let attempt_claude = |prompt: &str,
+                          resume_id: Option<&str>|
      -> Result<Option<ParsedClaudeTextResponse>, String> {
         let (mut command, tmp_path) = build_claude_text_command(
             repo_path.as_deref(),
@@ -4219,7 +4398,7 @@ fn run_inline_review_pipeline(
             .spawn()
             .map_err(|e| format!("Failed to run claude: {e}"))?;
         let pid = child.id();
-        set_inline_review_pid(&store, &key, run_id, pid);
+        set_inline_review_process_pid(&store, &key, run_id, pid, "Claude");
         let stdout = child
             .stdout
             .take()
@@ -4286,34 +4465,138 @@ fn run_inline_review_pipeline(
         Ok(Some(parsed))
     };
 
-    let response = if let Some(resume_session_id) = resume_session_id.as_deref() {
-        match attempt(&effective_payload, Some(resume_session_id)) {
-            Ok(Some(response)) => response,
-            Ok(None) => return Ok(()),
-            Err(error) => {
-                let fallback_payload =
-                    effective_fallback_payload.as_deref().ok_or(error.clone())?;
-                append_inline_review_log(
-                    &store,
-                    &key,
-                    run_id,
-                    format!(
-                        "Could not resume Claude session {}; retrying with a fresh session.",
-                        resume_session_id
-                    ),
-                );
-                append_inline_review_log(&store, &key, run_id, format!("Resume error: {error}"));
-                match attempt(fallback_payload, None)? {
+    let attempt_codex = |prompt: &str| -> Result<Option<ParsedClaudeTextResponse>, String> {
+        let (mut command, tmp_path, output_path) = build_codex_text_command(
+            repo_path.as_deref(),
+            prompt,
+            codex_model.as_deref(),
+            codex_effort.as_deref(),
+        )?;
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Failed to run codex: {e}"))?;
+        let pid = child.id();
+        set_inline_review_process_pid(&store, &key, run_id, pid, "Codex");
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "codex stdout was not captured".to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "codex stderr was not captured".to_string())?;
+        let stdout_buf = Arc::new(Mutex::new(String::new()));
+        let stderr_buf = Arc::new(Mutex::new(String::new()));
+        let stdout_thread = read_codex_inline_review_stream(
+            stdout,
+            store.clone(),
+            key.clone(),
+            run_id,
+            "stdout",
+            stdout_buf.clone(),
+        );
+        let stderr_thread = read_codex_inline_review_stream(
+            stderr,
+            store.clone(),
+            key.clone(),
+            run_id,
+            "stderr",
+            stderr_buf.clone(),
+        );
+        if inline_review_cancel_requested(&store, &key, run_id) {
+            let _ = kill_process(pid);
+        }
+
+        let started = Instant::now();
+        let status = child
+            .wait()
+            .map_err(|e| format!("Failed while waiting for codex: {e}"))?;
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let _ = stdout_thread.join();
+        let _ = stderr_thread.join();
+        clear_inline_review_pid(&store, &key, run_id);
+
+        let output = CommandOutput {
+            code: status.code(),
+            stdout: stdout_buf.lock().map(|buf| buf.clone()).unwrap_or_default(),
+            stderr: stderr_buf.lock().map(|buf| buf.clone()).unwrap_or_default(),
+        };
+
+        let file_content = fs::read_to_string(&output_path).unwrap_or_default();
+        let _ = fs::remove_file(&tmp_path);
+        let _ = fs::remove_file(&output_path);
+
+        if inline_review_cancel_requested(&store, &key, run_id) {
+            mark_inline_review_cancelled(&store, &key, run_id);
+            return Ok(None);
+        }
+
+        if output.code != Some(0) {
+            return Err(format!(
+                "codex exited with code {:?}.\nstderr: {stderr}\nstdout: {stdout}",
+                output.code,
+                stderr = output.stderr.trim(),
+                stdout = output.stdout.trim(),
+            ));
+        }
+
+        let content = if file_content.trim().is_empty() {
+            output.stdout.trim().to_string()
+        } else {
+            file_content.trim().to_string()
+        };
+        if content.trim().is_empty() {
+            return Err("Codex returned an empty review response.".to_string());
+        }
+        Ok(Some(ParsedClaudeTextResponse {
+            content,
+            duration_ms: Some(duration_ms),
+            session_id: None,
+            permission_denials: 0,
+        }))
+    };
+
+    let response = match ai_provider {
+        AiProvider::Claude => {
+            if let Some(resume_session_id) = resume_session_id.as_deref() {
+                match attempt_claude(&effective_payload, Some(resume_session_id)) {
+                    Ok(Some(response)) => response,
+                    Ok(None) => return Ok(()),
+                    Err(error) => {
+                        let fallback_payload =
+                            effective_fallback_payload.as_deref().ok_or(error.clone())?;
+                        append_inline_review_log(
+                            &store,
+                            &key,
+                            run_id,
+                            format!(
+                                "Could not resume Claude session {}; retrying with a fresh session.",
+                                resume_session_id
+                            ),
+                        );
+                        append_inline_review_log(
+                            &store,
+                            &key,
+                            run_id,
+                            format!("Resume error: {error}"),
+                        );
+                        match attempt_claude(fallback_payload, None)? {
+                            Some(response) => response,
+                            None => return Ok(()),
+                        }
+                    }
+                }
+            } else {
+                match attempt_claude(&effective_payload, None)? {
                     Some(response) => response,
                     None => return Ok(()),
                 }
             }
         }
-    } else {
-        match attempt(&effective_payload, None)? {
+        AiProvider::Codex => match attempt_codex(&effective_payload)? {
             Some(response) => response,
             None => return Ok(()),
-        }
+        },
     };
 
     if response.permission_denials > 0 {
@@ -4322,7 +4605,7 @@ fn run_inline_review_pipeline(
             &key,
             run_id,
             format!(
-                "Claude reported {} permission denial(s) while producing the review.",
+                "{provider_label} reported {} permission denial(s) while producing the review.",
                 response.permission_denials
             ),
         );
@@ -4332,15 +4615,27 @@ fn run_inline_review_pipeline(
             &store,
             &key,
             run_id,
-            format!("Claude finished in {}.", human_duration(duration_ms)),
+            format!(
+                "{provider_label} finished in {}.",
+                human_duration(duration_ms)
+            ),
         );
     }
-    if let Some(session_id) = response.session_id.as_deref() {
+    if ai_provider == AiProvider::Claude {
+        if let Some(session_id) = response.session_id.as_deref() {
+            append_inline_review_log(
+                &store,
+                &key,
+                run_id,
+                format!("Claude session: {session_id}"),
+            );
+        }
+    } else if response.session_id.is_some() {
         append_inline_review_log(
             &store,
             &key,
             run_id,
-            format!("Claude session: {session_id}"),
+            format!("{provider_label} session captured."),
         );
     }
 
@@ -4359,6 +4654,7 @@ fn run_inline_review_pipeline(
         &generated_at,
         &effective_snapshot_payload,
         response.content.trim(),
+        assistant_evidence_source,
         analyzer_artifacts,
     )?;
     let thread = find_review_thread_mut(&mut review_store, &thread_id)?;
@@ -4368,14 +4664,14 @@ fn run_inline_review_pipeline(
         response.content.trim().to_string(),
         generated_at.clone(),
     );
-    if response.session_id.is_some() {
+    if ai_provider == AiProvider::Claude && response.session_id.is_some() {
         thread.claude_session_id = response.session_id.clone();
     }
     review_store.active_thread_id = Some(thread_id);
     review_store.review_runs.push(review_run);
     save_review_store(&workspace, &repo, id, &review_store)?;
 
-    finish_inline_review_success(&store, &key, run_id, generated_at);
+    finish_inline_review_success(&store, &key, run_id, generated_at, provider_label);
     Ok(())
 }
 
@@ -4512,9 +4808,13 @@ pub async fn start_inline_review(
     destination_branch: String,
     payload: String,
     display_message: Option<String>,
+    ai_provider: Option<AiProvider>,
     claude_model: Option<String>,
     claude_effort: Option<String>,
+    codex_model: Option<String>,
+    codex_effort: Option<String>,
 ) -> Result<AiReviewRunState, String> {
+    let ai_provider = ai_provider.unwrap_or_default();
     let key = pr_key(&workspace, &repo, id);
     let thread_id = now_id("thread");
     let (initial, run_id) = begin_inline_review_run(
@@ -4571,8 +4871,11 @@ pub async fn start_inline_review(
             payload,
             None,
             None,
+            ai_provider,
             claude_model,
             claude_effort,
+            codex_model,
+            codex_effort,
         ) {
             set_inline_review_failed(&store_clone, &key, run_id, error);
         }
@@ -4592,9 +4895,13 @@ pub async fn reply_inline_review(
     thread_id: String,
     user_message: String,
     base_payload: String,
+    ai_provider: Option<AiProvider>,
     claude_model: Option<String>,
     claude_effort: Option<String>,
+    codex_model: Option<String>,
+    codex_effort: Option<String>,
 ) -> Result<AiReviewRunState, String> {
+    let ai_provider = ai_provider.unwrap_or_default();
     let trimmed_message = user_message.trim();
     if trimmed_message.is_empty() {
         return Err("A reply message is required.".to_string());
@@ -4603,7 +4910,11 @@ pub async fn reply_inline_review(
     let mut review_store = load_review_store(&workspace, &repo, id)?
         .ok_or_else(|| "No saved AI review exists for this pull request yet.".to_string())?;
     let thread = find_review_thread(&review_store, &thread_id)?;
-    let resume_session_id = thread.claude_session_id.clone();
+    let resume_session_id = if ai_provider == AiProvider::Claude {
+        thread.claude_session_id.clone()
+    } else {
+        None
+    };
     let fallback_payload = build_reply_fallback_payload(&base_payload, thread, trimmed_message);
     let (initial, run_id) = begin_inline_review_run(
         store.inner(),
@@ -4652,8 +4963,11 @@ pub async fn reply_inline_review(
             primary_payload,
             resume_for_pipeline,
             fallback_for_pipeline,
+            ai_provider,
             claude_model,
             claude_effort,
+            codex_model,
+            codex_effort,
         ) {
             set_inline_review_failed(&store_clone, &key, run_id, error);
         }
@@ -5082,14 +5396,14 @@ pub fn reset_ai_review_fix_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_review_finding_publication_event, extract_review_findings,
+        apply_review_finding_publication_event, build_codex_text_command, extract_review_findings,
         format_claude_stream_log_line, human_duration, materialize_review_run,
-        parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
-        parse_review_resources, review_findings_from_output, AiReviewDraftCommentResult,
-        AiReviewTurnKind, ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource,
-        ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingPublicationEvent,
-        ReviewFindingPublicationEventKind, ReviewFindingSeverity, ReviewPublicationMode,
-        STRUCTURED_REVIEW_SCHEMA_VERSION,
+        normalize_codex_effort, normalize_codex_model, parse_claude_fix_result,
+        parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
+        review_findings_from_output, AiReviewDraftCommentResult, AiReviewTurnKind,
+        ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
+        ReviewFindingConfidence, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
+        ReviewFindingSeverity, ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
 
     #[test]
@@ -5135,6 +5449,42 @@ mod tests {
         assert_eq!(parsed.content, "## Review\n\n- Looks correct.");
         assert_eq!(parsed.duration_ms, Some(1420));
         assert_eq!(parsed.session_id.as_deref(), Some("review-session"));
+    }
+
+    #[test]
+    fn normalizes_codex_model_and_effort_settings() {
+        assert_eq!(
+            normalize_codex_model("gpt-5-codex").as_deref(),
+            Some("gpt-5-codex")
+        );
+        assert_eq!(normalize_codex_model("gpt 5"), None);
+        assert_eq!(normalize_codex_effort("low"), Some("low"));
+        assert_eq!(normalize_codex_effort("medium"), Some("medium"));
+        assert_eq!(normalize_codex_effort("high"), Some("high"));
+        assert_eq!(normalize_codex_effort("max"), None);
+    }
+
+    #[test]
+    fn builds_codex_review_command_with_model_effort_and_read_only_sandbox() {
+        let (command, prompt_path, output_path) =
+            build_codex_text_command(None, "review prompt", Some("gpt-5-codex"), Some("high"))
+                .expect("codex command should build");
+        let shell = command
+            .get_args()
+            .nth(1)
+            .expect("zsh command should include shell payload")
+            .to_string_lossy();
+
+        assert!(shell.contains("codex exec"));
+        assert!(shell.contains("--sandbox read-only"));
+        assert!(shell.contains("--ask-for-approval never"));
+        assert!(shell.contains("--output-last-message"));
+        assert!(shell.contains("gpt-5-codex"));
+        assert!(shell.contains("model_reasoning_effort=high"));
+        assert!(shell.contains("--skip-git-repo-check"));
+
+        let _ = std::fs::remove_file(prompt_path);
+        let _ = std::fs::remove_file(output_path);
     }
 
     #[test]
@@ -5413,6 +5763,7 @@ Fix: render a useful empty state.
             "1750076460000",
             "diff payload snapshot",
             &review,
+            ReviewEvidenceSource::Claude,
             Vec::new(),
         )
         .expect("review run should materialize");
@@ -5453,6 +5804,7 @@ Fix: render a useful empty state.
             "1750076460000",
             "diff payload snapshot",
             review,
+            ReviewEvidenceSource::Claude,
             Vec::new(),
         )
         .expect("review run should materialize");
@@ -5486,6 +5838,7 @@ Fix: invalidate the query after the mutation succeeds."#;
             "1750076460000",
             "diff payload snapshot",
             review,
+            ReviewEvidenceSource::Claude,
             vec![ReviewEvidenceArtifact {
                 id: "run-1-evidence-analyzer-1".to_string(),
                 kind: ReviewEvidenceKind::Analyzer,
@@ -5523,6 +5876,7 @@ Fix: invalidate the query after the mutation succeeds."#;
             "1750076460000",
             "diff payload snapshot",
             review,
+            ReviewEvidenceSource::Claude,
             Vec::new(),
         )
         .expect("review run should materialize");

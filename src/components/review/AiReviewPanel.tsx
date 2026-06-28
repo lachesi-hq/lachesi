@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { parseReviewPromptDisplayMessage } from "@/lib/aiReviewPromptDisplay";
 import { summarizeActiveReviewFindings } from "@/lib/reviewFindingPublication";
 import type {
+  AiProvider,
   AiReviewFixPhase,
   AiReviewFixState,
   AiReviewRunState,
@@ -50,6 +51,7 @@ export interface AiReviewPanelProps {
   activeThread: AiReviewThread | null;
   activeRun?: ReviewRun | null;
   reviewState?: AiReviewRunState | null;
+  aiProvider?: AiProvider;
   loading: boolean;
   error: string | null;
   onRun?: () => void;
@@ -206,7 +208,6 @@ function findingSeverityBadgeClass(severity: ReviewFindingSeverity): string {
       return "inline-flex items-center rounded-full border border-transparent bg-amber-400 px-2 py-0.5 text-xs font-medium text-amber-950";
     case "low":
       return "inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-foreground";
-    case "info":
     default:
       return "inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground";
   }
@@ -228,7 +229,6 @@ function publicationModeLabel(mode: ReviewPublicationMode): string {
       return "File";
     case "localOnly":
       return "Local only";
-    case "inline":
     default:
       return "Inline";
   }
@@ -437,6 +437,7 @@ export function AiReviewPanel({
   activeThread,
   activeRun,
   reviewState,
+  aiProvider = "claude",
   loading,
   error,
   onRun,
@@ -469,6 +470,7 @@ export function AiReviewPanel({
   const commitDraftKeyRef = useRef(fixState?.suggestedCommitMessage ?? "");
 
   const fixRunning = fixState?.status === "running";
+  const providerLabel = aiProvider === "codex" ? "Codex" : "Claude";
   const hasThreads = Boolean(store?.threads.length);
   const hasReview = Boolean(hasThreads || loading || error || onRun);
   const canCommit =
@@ -608,6 +610,7 @@ export function AiReviewPanel({
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {findingCount > 0 && <Badge variant="secondary">{findingCount} findings</Badge>}
+          <Badge variant="muted">{providerLabel}</Badge>
           {stagedFindingCount > 0 && <Badge variant="muted">{stagedFindingCount} staged</Badge>}
           {publishedFindingCount > 0 && (
             <Badge variant="success">{publishedFindingCount} published</Badge>
@@ -1003,7 +1006,9 @@ export function AiReviewPanel({
           <div className="flex min-h-full flex-col justify-end p-4">
             <div className="mx-auto mb-6 flex max-w-xl flex-col items-center gap-3 text-center">
               <Sparkle size={32} weight="thin" className="text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Ask Claude about this pull request.</p>
+              <p className="text-sm text-muted-foreground">
+                Ask {providerLabel} about this pull request.
+              </p>
               <p className="text-xs text-muted-foreground">
                 Type a question freely, or use the AI review shortcut to start a full review.
               </p>
@@ -1014,7 +1019,7 @@ export function AiReviewPanel({
                   htmlFor="ai-review-new-message"
                   className="block text-xs font-medium text-foreground"
                 >
-                  Message Claude
+                  Message {providerLabel}
                 </label>
                 <textarea
                   id="ai-review-new-message"
@@ -1206,7 +1211,7 @@ export function AiReviewPanel({
               )}
               {activeThread.messages.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                  Claude is preparing this thread.
+                  {providerLabel} is preparing this thread.
                 </div>
               ) : (
                 activeThread.messages.map((message) => (
@@ -1241,7 +1246,7 @@ export function AiReviewPanel({
                     htmlFor="ai-review-reply"
                     className="block text-xs font-medium text-foreground"
                   >
-                    Reply to Claude
+                    Reply to {providerLabel}
                   </label>
                   <textarea
                     id="ai-review-reply"
