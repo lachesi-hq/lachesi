@@ -306,9 +306,8 @@ body {
 
 .repo-blame-popover {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
   min-width: 0;
+  max-width: min(52rem, calc(100vw - 26rem));
   margin: 0.25rem 1rem 0.45rem 4.25rem;
   padding: 0.45rem 0.65rem;
   border: 1px solid var(--border);
@@ -318,6 +317,32 @@ body {
   font-family: var(--font-sans);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.repo-blame-details {
+  min-width: 0;
+  width: 100%;
+}
+
+.repo-blame-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.repo-blame-message {
+  max-height: 10.5rem;
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--border);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 12px;
 }
 
 .repo-code-viewer .token.comment,

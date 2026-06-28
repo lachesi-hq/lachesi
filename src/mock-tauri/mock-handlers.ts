@@ -135,6 +135,9 @@ function mockBlameForPath(path: string): RepositoryBlameLine[] {
     authorEmail: index % 2 === 0 ? "ada@example.com" : "grace@example.com",
     authorTime: 1710000000 + index * 60,
     summary: path.endsWith("format.ts") ? "Add currency formatting helper" : "Update fixture file",
+    message: path.endsWith("format.ts")
+      ? "Add currency formatting helper\n\nUse a shared helper for display consistency."
+      : "Update fixture file\n\nRefresh the mock repository content used by the explorer.",
   }));
 }
 

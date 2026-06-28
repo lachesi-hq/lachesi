@@ -96,7 +96,8 @@ describe("RepositoryExplorerPanel", () => {
       "href",
       "https://bitbucket.org/example-workspace/frontend-app/commits/6f52c9a1cf5cd075762f13d0b0f8bf8d0f4f3f7d",
     );
-    expect(screen.getByText("Update fixture file")).toBeInTheDocument();
+    expect(screen.getByText(/Update fixture file/)).toBeInTheDocument();
+    expect(screen.getByText(/Refresh the mock repository content/)).toBeInTheDocument();
 
     await user.click(lineButton);
 
