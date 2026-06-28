@@ -372,12 +372,51 @@ body {
   line-height: 1.7;
 }
 
+.repo-markdown-viewer .lachesi-md h1,
+.repo-markdown-viewer .lachesi-md h2,
+.repo-markdown-viewer .lachesi-md h3,
+.repo-markdown-viewer .lachesi-md h4 {
+  letter-spacing: 0;
+}
+
 .repo-markdown-viewer .lachesi-md h1 {
   font-size: 1.8em;
+  color: var(--accent-foreground);
 }
 
 .repo-markdown-viewer .lachesi-md h2 {
   font-size: 1.35em;
+  color: var(--success);
+  border-bottom-color: color-mix(in srgb, var(--success) 32%, var(--border));
+}
+
+.repo-markdown-viewer .lachesi-md h3,
+.repo-markdown-viewer .lachesi-md h4 {
+  color: var(--warning);
+}
+
+.repo-markdown-viewer .lachesi-md a {
+  color: var(--ring);
+}
+
+.repo-markdown-viewer .lachesi-md code {
+  background: color-mix(in srgb, var(--warning) 14%, var(--muted));
+  color: var(--warning);
+}
+
+.repo-markdown-viewer .lachesi-md pre code {
+  color: var(--foreground);
+}
+
+.repo-markdown-viewer .lachesi-md blockquote {
+  border-left-color: var(--accent-foreground);
+  background: color-mix(in srgb, var(--accent-foreground) 7%, transparent);
+  color: color-mix(in srgb, var(--foreground) 76%, var(--muted-foreground));
+}
+
+.repo-markdown-viewer .lachesi-md th {
+  background: color-mix(in srgb, var(--accent-foreground) 8%, var(--muted));
+  color: var(--accent-foreground);
 }
 
 .repo-diff-line {
