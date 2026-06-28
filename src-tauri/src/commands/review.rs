@@ -2033,6 +2033,7 @@ fn begin_inline_review_run(
     title: String,
     thread_id: String,
     turn_kind: AiReviewTurnKind,
+    review_kind: Option<&str>,
 ) -> Result<(AiReviewRunState, u64), String> {
     with_review_run_store(store, |inner| {
         if let Some(active) = inner.active_key.as_deref() {
@@ -2057,11 +2058,18 @@ fn begin_inline_review_run(
             turn_kind: Some(turn_kind),
             status: AiReviewRunStatus::Running,
             logs: match turn_kind {
-                AiReviewTurnKind::Initial => vec![
-                    "Starting AI review…".to_string(),
-                    format!("Reviewing PR: {title}"),
-                    format!("Saving output to review thread {thread_id}."),
-                ],
+                AiReviewTurnKind::Initial => {
+                    let starting = if review_kind == Some("lineQuestion") {
+                        "Starting line question…"
+                    } else {
+                        "Starting AI review…"
+                    };
+                    vec![
+                        starting.to_string(),
+                        format!("Reviewing PR: {title}"),
+                        format!("Saving output to review thread {thread_id}."),
+                    ]
+                }
                 AiReviewTurnKind::Reply => vec![
                     "Continuing AI review chat…".to_string(),
                     format!("Reviewing PR: {title}"),
@@ -4258,6 +4266,7 @@ fn run_inline_review_pipeline(
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    skip_analyzers: bool,
 ) -> Result<(), String> {
     let provider_label = match ai_provider {
         AiProvider::Claude => "Claude",
@@ -4273,7 +4282,7 @@ fn run_inline_review_pipeline(
     let mut effective_fallback_payload = fallback_payload.clone();
     let mut effective_snapshot_payload = snapshot_payload.clone();
 
-    if turn_kind == AiReviewTurnKind::Initial {
+    if turn_kind == AiReviewTurnKind::Initial && !skip_analyzers {
         if let Some(repo_path) = repo_path.as_deref() {
             append_inline_review_log(&store, &key, run_id, "Running local evidence analyzers.");
             let results = match analyzer_specs(repo_path) {
@@ -4357,6 +4366,13 @@ fn run_inline_review_pipeline(
                 "No local clone configured; skipping local evidence analyzers.",
             );
         }
+    } else if skip_analyzers {
+        append_inline_review_log(
+            &store,
+            &key,
+            run_id,
+            "Skipping local evidence analyzers for focused line question.",
+        );
     }
 
     append_inline_review_log(
@@ -4808,6 +4824,9 @@ pub async fn start_inline_review(
     destination_branch: String,
     payload: String,
     display_message: Option<String>,
+    review_kind: Option<String>,
+    thread_title: Option<String>,
+    skip_analyzers: Option<bool>,
     ai_provider: Option<AiProvider>,
     claude_model: Option<String>,
     claude_effort: Option<String>,
@@ -4815,6 +4834,7 @@ pub async fn start_inline_review(
     codex_effort: Option<String>,
 ) -> Result<AiReviewRunState, String> {
     let ai_provider = ai_provider.unwrap_or_default();
+    let skip_analyzers = skip_analyzers.unwrap_or(false);
     let key = pr_key(&workspace, &repo, id);
     let thread_id = now_id("thread");
     let (initial, run_id) = begin_inline_review_run(
@@ -4823,6 +4843,7 @@ pub async fn start_inline_review(
         title,
         thread_id.clone(),
         AiReviewTurnKind::Initial,
+        review_kind.as_deref(),
     )?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
     let created_at = now_ms();
@@ -4830,7 +4851,12 @@ pub async fn start_inline_review(
     review_store.active_thread_id = Some(thread_id.clone());
     let mut thread = AiReviewThread {
         id: thread_id.clone(),
-        title: review_thread_title(),
+        title: thread_title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(review_thread_title),
         created_at: created_at.clone(),
         updated_at: created_at.clone(),
         claude_session_id: None,
@@ -4876,6 +4902,7 @@ pub async fn start_inline_review(
             claude_effort,
             codex_model,
             codex_effort,
+            skip_analyzers,
         ) {
             set_inline_review_failed(&store_clone, &key, run_id, error);
         }
@@ -4922,6 +4949,7 @@ pub async fn reply_inline_review(
         title,
         thread_id.clone(),
         AiReviewTurnKind::Reply,
+        None,
     )?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
     let thread = find_review_thread_mut(&mut review_store, &thread_id)?;
@@ -4968,6 +4996,7 @@ pub async fn reply_inline_review(
             claude_effort,
             codex_model,
             codex_effort,
+            false,
         ) {
             set_inline_review_failed(&store_clone, &key, run_id, error);
         }
