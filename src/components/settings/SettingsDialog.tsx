@@ -381,12 +381,16 @@ function SettingsForm({
           <div className="grid gap-3 md:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="settings-codex-model">Codex review model</Label>
-              <Input
+              <select
                 id="settings-codex-model"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
                 value={codexModel}
                 onChange={(event) => setCodexModel(event.target.value)}
-                placeholder="Default"
-              />
+              >
+                <option value="">Default</option>
+                <option value="gpt-5.4">gpt-5.4</option>
+                <option value="gpt-5.5">gpt-5.5</option>
+              </select>
               <p className="text-xs text-muted-foreground">
                 Passed to Codex as <span className="font-mono">--model</span> when set.
               </p>
