@@ -59,10 +59,20 @@ const EXT_LANG: Record<string, string> = {
 
 const MAX_CHANGES = 3000;
 
-function languageForPath(path: string): string | undefined {
+export function languageForPath(path: string): string | undefined {
   const ext = path.split(".").pop()?.toLowerCase();
   return ext ? EXT_LANG[ext] : undefined;
 }
+
+export type HighlightNode = {
+  type: string;
+  value?: string;
+  tagName?: string;
+  properties?: {
+    className?: string | string[];
+  };
+  children?: HighlightNode[];
+};
 
 /** Syntax-highlight a file's hunks via refractor. Returns undefined when the
  * language is unknown/unregistered, the file is too large, or tokenizing fails. */
@@ -78,5 +88,16 @@ export function tokenizeFile(file: FileData): ReturnType<typeof tokenize> | unde
     return tokenize(file.hunks, { highlight: true, refractor: highlighter, language });
   } catch {
     return undefined;
+  }
+}
+
+export function highlightCode(path: string, content: string): HighlightNode[] | null {
+  const language = languageForPath(path);
+  if (!language || !refractor.registered(language)) return null;
+
+  try {
+    return refractor.highlight(content, language).children as HighlightNode[];
+  } catch {
+    return null;
   }
 }

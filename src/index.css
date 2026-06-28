@@ -262,6 +262,135 @@ body {
   color: var(--toolbar-active-ink);
 }
 
+.repo-code-viewer {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.repo-code-line {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+  min-height: 1.55em;
+}
+
+.repo-code-line:hover {
+  background: var(--muted);
+}
+
+.repo-code-line--active {
+  background: var(--diff-hunk-bg);
+  box-shadow: inset 3px 0 0 var(--ring);
+}
+
+.repo-code-gutter {
+  padding: 0 0.75rem;
+  text-align: right;
+  color: var(--muted-foreground);
+  user-select: none;
+}
+
+.repo-code-content {
+  min-width: 0;
+  padding-right: 1rem;
+  white-space: pre;
+}
+
+.repo-code-viewer .token.comment,
+.repo-code-viewer .token.prolog,
+.repo-code-viewer .token.doctype,
+.repo-code-viewer .token.cdata {
+  color: #6e7781;
+  font-style: italic;
+}
+
+.repo-code-viewer .token.punctuation {
+  color: #24292f;
+}
+
+.repo-code-viewer .token.keyword,
+.repo-code-viewer .token.operator,
+.repo-code-viewer .token.tag,
+.repo-code-viewer .token.deleted {
+  color: #cf222e;
+}
+
+.repo-code-viewer .token.string,
+.repo-code-viewer .token.char,
+.repo-code-viewer .token.attr-value,
+.repo-code-viewer .token.inserted {
+  color: #0a3069;
+}
+
+.repo-code-viewer .token.function,
+.repo-code-viewer .token.class-name {
+  color: #8250df;
+}
+
+.repo-code-viewer .token.number,
+.repo-code-viewer .token.boolean,
+.repo-code-viewer .token.constant,
+.repo-code-viewer .token.symbol,
+.repo-code-viewer .token.property,
+.repo-code-viewer .token.attr-name,
+.repo-code-viewer .token.variable {
+  color: #0550ae;
+}
+
+.repo-code-viewer .token.selector,
+.repo-code-viewer .token.builtin,
+.repo-code-viewer .token.regex {
+  color: #116329;
+}
+
+[data-theme="dark"] .repo-code-viewer .token.comment,
+[data-theme="dark"] .repo-code-viewer .token.prolog,
+[data-theme="dark"] .repo-code-viewer .token.doctype,
+[data-theme="dark"] .repo-code-viewer .token.cdata {
+  color: #8b949e;
+}
+
+[data-theme="dark"] .repo-code-viewer .token.punctuation {
+  color: #c9d1d9;
+}
+
+[data-theme="dark"] .repo-code-viewer .token.keyword,
+[data-theme="dark"] .repo-code-viewer .token.operator,
+[data-theme="dark"] .repo-code-viewer .token.tag,
+[data-theme="dark"] .repo-code-viewer .token.deleted {
+  color: #ff7b72;
+}
+
+[data-theme="dark"] .repo-code-viewer .token.string,
+[data-theme="dark"] .repo-code-viewer .token.char,
+[data-theme="dark"] .repo-code-viewer .token.attr-value,
+[data-theme="dark"] .repo-code-viewer .token.inserted {
+  color: #a5d6ff;
+}
+
+[data-theme="dark"] .repo-code-viewer .token.function,
+[data-theme="dark"] .repo-code-viewer .token.class-name {
+  color: #d2a8ff;
+}
+
+[data-theme="dark"] .repo-code-viewer .token.number,
+[data-theme="dark"] .repo-code-viewer .token.boolean,
+[data-theme="dark"] .repo-code-viewer .token.constant,
+[data-theme="dark"] .repo-code-viewer .token.symbol,
+[data-theme="dark"] .repo-code-viewer .token.property,
+[data-theme="dark"] .repo-code-viewer .token.attr-name,
+[data-theme="dark"] .repo-code-viewer .token.variable {
+  color: #79c0ff;
+}
+
+[data-theme="dark"] .repo-code-viewer .token.selector,
+[data-theme="dark"] .repo-code-viewer .token.builtin,
+[data-theme="dark"] .repo-code-viewer .token.regex {
+  color: #7ee787;
+}
+
 .toolbar-toggle:disabled {
   cursor: not-allowed;
   opacity: 0.45;

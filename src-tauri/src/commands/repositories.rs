@@ -1,4 +1,5 @@
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use serde::Serialize;
@@ -46,6 +47,23 @@ pub struct RepositoryWorktreeState {
     pub error: Option<String>,
 }
 
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryFileEntry {
+    pub path: String,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryFileContent {
+    pub path: String,
+    pub content: String,
+    pub size: u64,
+    pub truncated: bool,
+}
+
+const MAX_REPOSITORY_FILE_BYTES: u64 = 512 * 1024;
+
 fn git_command(repo_path: &Path) -> Command {
     let mut cmd = Command::new("/usr/bin/git");
     cmd.current_dir(repo_path);
@@ -68,6 +86,25 @@ fn run_git_checked(repo_path: &Path, args: &[&str]) -> Result<String, String> {
     let (code, stdout, stderr) = run_git(repo_path, args)?;
     if code == Some(0) {
         Ok(stdout.trim().to_string())
+    } else {
+        Err(format!(
+            "git {} failed with code {:?}: {}{}",
+            args.join(" "),
+            code,
+            stderr.trim(),
+            if stdout.trim().is_empty() {
+                String::new()
+            } else {
+                format!("\nstdout: {}", stdout.trim())
+            }
+        ))
+    }
+}
+
+fn run_git_checked_raw(repo_path: &Path, args: &[&str]) -> Result<String, String> {
+    let (code, stdout, stderr) = run_git(repo_path, args)?;
+    if code == Some(0) {
+        Ok(stdout)
     } else {
         Err(format!(
             "git {} failed with code {:?}: {}{}",
@@ -286,6 +323,40 @@ fn configured_repo(workspace: &str, repo: &str) -> Result<PathBuf, String> {
     Ok(repo_path)
 }
 
+fn validate_repo_relative_path(path: &str) -> Result<(), String> {
+    let candidate = Path::new(path);
+    if candidate.is_absolute() {
+        return Err("Repository file path must be relative.".to_string());
+    }
+    if path.trim().is_empty() {
+        return Err("Repository file path is required.".to_string());
+    }
+    if candidate.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err("Repository file path cannot escape the repository.".to_string());
+    }
+    Ok(())
+}
+
+fn safe_repo_file_path(repo_path: &Path, path: &str) -> Result<PathBuf, String> {
+    validate_repo_relative_path(path)?;
+    let full_path = repo_path.join(path);
+    let canonical_repo = repo_path
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve repository path: {e}"))?;
+    let canonical_file = full_path
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve repository file path: {e}"))?;
+    if !canonical_file.starts_with(&canonical_repo) {
+        return Err("Repository file path cannot escape the repository.".to_string());
+    }
+    Ok(canonical_file)
+}
+
 fn fetch_repo(repo_path: &Path) -> Result<(), String> {
     run_git_checked(repo_path, &["fetch", "--prune", "origin"])?;
     Ok(())
@@ -310,6 +381,52 @@ pub fn list_repository_worktrees() -> Result<Vec<RepositoryWorktreeState>, Strin
             state_for_repo(repo_ref.workspace, repo_ref.repo, path)
         })
         .collect())
+}
+
+#[tauri::command]
+pub fn list_repository_files(
+    workspace: String,
+    repo: String,
+) -> Result<Vec<RepositoryFileEntry>, String> {
+    let repo_path = configured_repo(&workspace, &repo)?;
+    let output = run_git_checked_raw(&repo_path, &["ls-files", "-z", "-co", "--exclude-standard"])?;
+    Ok(output
+        .split_terminator('\0')
+        .filter(|path| !path.is_empty())
+        .map(|path| RepositoryFileEntry {
+            path: path.to_string(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn read_repository_file(
+    workspace: String,
+    repo: String,
+    path: String,
+) -> Result<RepositoryFileContent, String> {
+    let repo_path = configured_repo(&workspace, &repo)?;
+    let file_path = safe_repo_file_path(&repo_path, &path)?;
+    let metadata = fs::metadata(&file_path).map_err(|e| format!("Failed to read file: {e}"))?;
+    if !metadata.is_file() {
+        return Err("Repository path is not a file.".to_string());
+    }
+    let size = metadata.len();
+    if size > MAX_REPOSITORY_FILE_BYTES {
+        return Err(format!(
+            "File is too large to preview ({} KB limit).",
+            MAX_REPOSITORY_FILE_BYTES / 1024
+        ));
+    }
+    let bytes = fs::read(&file_path).map_err(|e| format!("Failed to read file: {e}"))?;
+    let content = String::from_utf8(bytes)
+        .map_err(|_| "File is not valid UTF-8 and cannot be previewed.".to_string())?;
+    Ok(RepositoryFileContent {
+        path,
+        content,
+        size,
+        truncated: false,
+    })
 }
 
 #[tauri::command]
@@ -342,7 +459,7 @@ pub fn pull_repository(workspace: String, repo: String) -> Result<RepositoryWork
 
 #[cfg(test)]
 mod tests {
-    use super::local_branch_for_remote;
+    use super::{local_branch_for_remote, validate_repo_relative_path};
 
     #[test]
     fn maps_origin_remote_to_local_branch_name() {
@@ -352,5 +469,13 @@ mod tests {
         );
         assert_eq!(local_branch_for_remote("main"), None);
         assert_eq!(local_branch_for_remote("upstream/main"), None);
+    }
+
+    #[test]
+    fn validates_repository_relative_paths() {
+        assert!(validate_repo_relative_path("src/App.tsx").is_ok());
+        assert!(validate_repo_relative_path("../secrets").is_err());
+        assert!(validate_repo_relative_path("/tmp/secrets").is_err());
+        assert!(validate_repo_relative_path("").is_err());
     }
 }

@@ -6,6 +6,7 @@ import { PrDetailPanel } from "@/components/pr-detail/PrDetailPanel";
 import type { AuthorOption } from "@/components/pr-sidebar/AuthorFilter";
 import { PrSidebar } from "@/components/pr-sidebar/PrSidebar";
 import { RepositoryBranchesPanel } from "@/components/repositories/RepositoryBranchesPanel";
+import { RepositoryExplorerPanel } from "@/components/repository-explorer/RepositoryExplorerPanel";
 import { AiReviewPanel } from "@/components/review/AiReviewPanel";
 import { ReviewHistoryPanel } from "@/components/review-history/ReviewHistoryPanel";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
@@ -75,6 +76,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [repositoriesPanelOpen, setRepositoriesPanelOpen] = useState(false);
   const [reviewHistoryPanelOpen, setReviewHistoryPanelOpen] = useState(false);
+  const [repositoryExplorerOpen, setRepositoryExplorerOpen] = useState(false);
   const [detailPaneOpen, setDetailPaneOpen] = useState(true);
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
   const [reviewPanelExpanded, setReviewPanelExpanded] = useState(false);
@@ -119,6 +121,7 @@ export default function App() {
       repo: pr.repo,
       prId: pr.id,
       activeFilePath: null,
+      activeFileLine: null,
     });
   }, []);
 
@@ -365,6 +368,7 @@ export default function App() {
     if (selection.kind === "overview" || selection.kind === "settings") {
       setRepositoriesPanelOpen(false);
       setReviewHistoryPanelOpen(false);
+      setRepositoryExplorerOpen(false);
     }
     if (!activeSel) {
       setAiReviewContext(null);
@@ -488,6 +492,7 @@ export default function App() {
           repo: pr.repo,
           prId: pr.id,
           activeFilePath: null,
+          activeFileLine: null,
         });
       }
     };
@@ -500,6 +505,7 @@ export default function App() {
     sidebarOpen,
     repositoriesPanelOpen,
     reviewHistoryPanelOpen,
+    repositoryExplorerOpen,
     detailPaneOpen,
     reviewPanelOpen,
   ].filter(Boolean).length;
@@ -773,6 +779,28 @@ export default function App() {
     await aiReviewFix.startConflictResolution(sourceBranch, destinationBranch, tips);
   };
 
+  const handleOpenRepositoryFile = (path: string, line?: number | null) => {
+    if (!activeSel) return;
+    setRepositoriesPanelOpen(false);
+    setReviewHistoryPanelOpen(false);
+    setDetailPaneOpen(false);
+    setRepositoryExplorerOpen(true);
+    setSelection({
+      ...activeSel,
+      activeFilePath: path,
+      activeFileLine: line ?? null,
+    });
+  };
+
+  const handleSelectRepositoryExplorerFile = (path: string, line?: number | null) => {
+    if (!activeSel) return;
+    setSelection({
+      ...activeSel,
+      activeFilePath: path,
+      activeFileLine: line ?? null,
+    });
+  };
+
   const handleStageAiReviewComments = async () => {
     if (!activeSel || !aiReviewContext || !aiReview.activeThread) {
       return {
@@ -848,10 +876,21 @@ export default function App() {
       pullRequests: pane === "pullRequests" ? !sidebarOpen : sidebarOpen,
       repositories: pane === "repositories" ? !repositoriesPanelOpen : repositoriesPanelOpen,
       reviewHistory: pane === "reviewHistory" ? !reviewHistoryPanelOpen : reviewHistoryPanelOpen,
+      repositoryExplorer:
+        pane === "repositoryExplorer" ? !repositoryExplorerOpen : repositoryExplorerOpen,
       details: pane === "details" ? !detailPaneOpen : detailPaneOpen,
       aiReview: pane === "aiReview" ? !reviewPanelOpen : reviewPanelOpen,
     };
-    if (!next.pullRequests && !next.repositories && !next.details && !next.aiReview) return;
+    if (
+      !next.pullRequests &&
+      !next.repositories &&
+      !next.reviewHistory &&
+      !next.repositoryExplorer &&
+      !next.details &&
+      !next.aiReview
+    ) {
+      return;
+    }
 
     if (pane === "pullRequests") {
       setSidebarOpen((prev) => !prev);
@@ -860,7 +899,10 @@ export default function App() {
     if (pane === "repositories") {
       setRepositoriesPanelOpen((prev) => {
         const open = !prev;
-        if (open) setReviewHistoryPanelOpen(false);
+        if (open) {
+          setReviewHistoryPanelOpen(false);
+          setRepositoryExplorerOpen(false);
+        }
         return open;
       });
       return;
@@ -868,13 +910,32 @@ export default function App() {
     if (pane === "reviewHistory") {
       setReviewHistoryPanelOpen((prev) => {
         const open = !prev;
-        if (open) setRepositoriesPanelOpen(false);
+        if (open) {
+          setRepositoriesPanelOpen(false);
+          setRepositoryExplorerOpen(false);
+        }
+        return open;
+      });
+      return;
+    }
+    if (pane === "repositoryExplorer") {
+      setRepositoryExplorerOpen((prev) => {
+        const open = !prev;
+        if (open) {
+          setRepositoriesPanelOpen(false);
+          setReviewHistoryPanelOpen(false);
+          setDetailPaneOpen(false);
+        }
         return open;
       });
       return;
     }
     if (pane === "details") {
-      setDetailPaneOpen((prev) => !prev);
+      setDetailPaneOpen((prev) => {
+        const open = !prev;
+        if (open) setRepositoryExplorerOpen(false);
+        return open;
+      });
       return;
     }
     setReviewPanelOpen((prev) => {
@@ -941,10 +1002,14 @@ export default function App() {
                 pullRequests: sidebarOpen,
                 repositories: repositoriesPanelOpen,
                 reviewHistory: reviewHistoryPanelOpen,
+                repositoryExplorer: repositoryExplorerOpen,
                 details: detailPaneOpen,
                 aiReview: reviewPanelOpen,
               }}
-              disabled={{ aiReview: activeSel == null && !reviewPanelOpen }}
+              disabled={{
+                aiReview: activeSel == null && !reviewPanelOpen,
+                repositoryExplorer: activeSel == null,
+              }}
               status={paneStatus}
               onTogglePane={handleTogglePane}
             />
@@ -969,6 +1034,7 @@ export default function App() {
               onSelectThread={(threadId) => aiReview.setActiveThread(threadId)}
               onClearThread={handleClearReview}
               onClose={handleCloseReviewPanel}
+              onOpenFile={handleOpenRepositoryFile}
               expanded={reviewPanelExpanded}
               onToggleExpand={() => setReviewPanelExpanded((prev) => !prev)}
               onStageComments={handleStageAiReviewComments}
@@ -1052,6 +1118,14 @@ export default function App() {
             <RepositoryBranchesPanel />
           ) : reviewHistoryPanelOpen ? (
             <ReviewHistoryPanel onSelectJob={handleSelectReviewJob} />
+          ) : repositoryExplorerOpen ? (
+            <RepositoryExplorerPanel
+              workspace={activeSel?.workspace ?? null}
+              repo={activeSel?.repo ?? null}
+              initialPath={activeSel?.activeFilePath ?? null}
+              initialLine={activeSel?.activeFileLine ?? null}
+              onSelectFile={handleSelectRepositoryExplorerFile}
+            />
           ) : detailPaneOpen ? (
             <PrDetailPanel
               workspace={activeSel?.workspace ?? null}
