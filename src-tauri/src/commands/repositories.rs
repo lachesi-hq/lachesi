@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -51,6 +52,19 @@ pub struct RepositoryWorktreeState {
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryFileEntry {
     pub path: String,
+    pub status: RepositoryFileStatus,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositoryFileStatus {
+    Unchanged,
+    Modified,
+    Added,
+    Deleted,
+    Renamed,
+    Untracked,
+    Conflicted,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -162,6 +176,61 @@ fn branch_refs(repo_path: &Path, args: &[&str]) -> Result<Vec<String>, String> {
         .filter(|line| !line.is_empty())
         .map(ToString::to_string)
         .collect())
+}
+
+fn file_status_from_porcelain(index_status: char, worktree_status: char) -> RepositoryFileStatus {
+    if index_status == '?' && worktree_status == '?' {
+        return RepositoryFileStatus::Untracked;
+    }
+    if index_status == 'U'
+        || worktree_status == 'U'
+        || matches!(
+            (index_status, worktree_status),
+            ('A', 'A') | ('D', 'D') | ('A', 'U') | ('D', 'U') | ('U', 'A') | ('U', 'D')
+        )
+    {
+        return RepositoryFileStatus::Conflicted;
+    }
+    if index_status == 'D' || worktree_status == 'D' {
+        return RepositoryFileStatus::Deleted;
+    }
+    if index_status == 'R' || worktree_status == 'R' {
+        return RepositoryFileStatus::Renamed;
+    }
+    if index_status == 'A' || worktree_status == 'A' {
+        return RepositoryFileStatus::Added;
+    }
+    if matches!(index_status, 'M' | 'T') || matches!(worktree_status, 'M' | 'T') {
+        return RepositoryFileStatus::Modified;
+    }
+    RepositoryFileStatus::Unchanged
+}
+
+fn parse_git_status_porcelain_z(output: &str) -> BTreeMap<String, RepositoryFileStatus> {
+    let mut statuses = BTreeMap::new();
+    let mut parts = output.split_terminator('\0');
+
+    while let Some(entry) = parts.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let mut chars = entry.chars();
+        let index_status = chars.next().unwrap_or(' ');
+        let worktree_status = chars.next().unwrap_or(' ');
+        let _space = chars.next();
+        let path = chars.as_str();
+        if path.is_empty() {
+            continue;
+        }
+
+        let status = file_status_from_porcelain(index_status, worktree_status);
+        if matches!(index_status, 'R' | 'C') || matches!(worktree_status, 'R' | 'C') {
+            let _old_path = parts.next();
+        }
+        statuses.insert(path.to_string(), status);
+    }
+
+    statuses
 }
 
 fn list_branch_options(
@@ -593,13 +662,36 @@ pub fn list_repository_files(
 ) -> Result<Vec<RepositoryFileEntry>, String> {
     let repo_path = configured_repo(&workspace, &repo)?;
     let output = run_git_checked_raw(&repo_path, &["ls-files", "-z", "-co", "--exclude-standard"])?;
-    Ok(output
+    let status_output = run_git_checked_raw(
+        &repo_path,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
+    let statuses = parse_git_status_porcelain_z(&status_output);
+    let mut files = output
         .split_terminator('\0')
         .filter(|path| !path.is_empty())
-        .map(|path| RepositoryFileEntry {
-            path: path.to_string(),
+        .map(|path| {
+            let status = statuses
+                .get(path)
+                .cloned()
+                .unwrap_or(RepositoryFileStatus::Unchanged);
+            (
+                path.to_string(),
+                RepositoryFileEntry {
+                    path: path.to_string(),
+                    status,
+                },
+            )
         })
-        .collect())
+        .collect::<BTreeMap<_, _>>();
+
+    for (path, status) in statuses {
+        files
+            .entry(path.clone())
+            .or_insert(RepositoryFileEntry { path, status });
+    }
+
+    Ok(files.into_values().collect())
 }
 
 #[tauri::command]
@@ -719,7 +811,8 @@ mod tests {
 
     use super::{
         editor_file_arg, local_branch_for_remote, parse_commit_messages,
-        parse_git_blame_line_porcelain, validate_repo_relative_path, GIT_SHOW_MESSAGE_MARKER,
+        parse_git_blame_line_porcelain, parse_git_status_porcelain_z, validate_repo_relative_path,
+        RepositoryFileStatus, GIT_SHOW_MESSAGE_MARKER,
     };
 
     #[test]
@@ -738,6 +831,35 @@ mod tests {
         assert!(validate_repo_relative_path("../secrets").is_err());
         assert!(validate_repo_relative_path("/tmp/secrets").is_err());
         assert!(validate_repo_relative_path("").is_err());
+    }
+
+    #[test]
+    fn parses_git_status_porcelain_z() {
+        let output = " M src/App.tsx\0A  src/New.tsx\0?? docs/draft.md\0 D src/Removed.tsx\0R  src/NewName.tsx\0src/OldName.tsx\0";
+
+        let statuses = parse_git_status_porcelain_z(output);
+
+        assert_eq!(
+            statuses.get("src/App.tsx"),
+            Some(&RepositoryFileStatus::Modified)
+        );
+        assert_eq!(
+            statuses.get("src/New.tsx"),
+            Some(&RepositoryFileStatus::Added)
+        );
+        assert_eq!(
+            statuses.get("docs/draft.md"),
+            Some(&RepositoryFileStatus::Untracked)
+        );
+        assert_eq!(
+            statuses.get("src/Removed.tsx"),
+            Some(&RepositoryFileStatus::Deleted)
+        );
+        assert_eq!(
+            statuses.get("src/NewName.tsx"),
+            Some(&RepositoryFileStatus::Renamed)
+        );
+        assert!(!statuses.contains_key("src/OldName.tsx"));
     }
 
     #[test]

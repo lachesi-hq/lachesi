@@ -33,7 +33,17 @@ export interface RepositoryWorktreeState {
 
 export interface RepositoryFileEntry {
   path: string;
+  status: RepositoryFileStatus;
 }
+
+export type RepositoryFileStatus =
+  | "unchanged"
+  | "modified"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "untracked"
+  | "conflicted";
 
 export interface RepositoryFileContent {
   path: string;

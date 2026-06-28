@@ -12,7 +12,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type HighlightNode, highlightCode } from "@/lib/highlight";
 import { tauriCall } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
-import type { RepositoryBlameLine, RepositoryFileContent, RepositoryFileEntry } from "@/types";
+import type {
+  RepositoryBlameLine,
+  RepositoryFileContent,
+  RepositoryFileEntry,
+  RepositoryFileStatus,
+} from "@/types";
 
 type DirectoryNode = {
   type: "directory";
@@ -117,6 +122,66 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function isChangedFileStatus(status: RepositoryFileStatus): boolean {
+  return status !== "unchanged";
+}
+
+function fileStatusLabel(status: RepositoryFileStatus): string | null {
+  switch (status) {
+    case "modified":
+      return "M";
+    case "added":
+      return "A";
+    case "deleted":
+      return "D";
+    case "renamed":
+      return "R";
+    case "untracked":
+      return "U";
+    case "conflicted":
+      return "!";
+    case "unchanged":
+      return null;
+  }
+}
+
+function fileStatusTitle(status: RepositoryFileStatus): string {
+  switch (status) {
+    case "modified":
+      return "Modified";
+    case "added":
+      return "Added";
+    case "deleted":
+      return "Deleted";
+    case "renamed":
+      return "Renamed";
+    case "untracked":
+      return "Untracked";
+    case "conflicted":
+      return "Conflicted";
+    case "unchanged":
+      return "Unchanged";
+  }
+}
+
+function fileStatusClassName(status: RepositoryFileStatus): string {
+  switch (status) {
+    case "modified":
+      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+    case "added":
+    case "untracked":
+      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+    case "deleted":
+      return "border-red-500/40 bg-red-500/10 text-red-300";
+    case "renamed":
+      return "border-blue-500/40 bg-blue-500/10 text-blue-300";
+    case "conflicted":
+      return "border-destructive/50 bg-destructive/10 text-destructive";
+    case "unchanged":
+      return "";
+  }
+}
+
 function formatBlameTime(authorTime: number | null): string | null {
   if (authorTime == null) return null;
   return new Date(authorTime * 1000).toLocaleString(undefined, {
@@ -186,6 +251,7 @@ function RepositoryTreeRows({
         }
 
         const active = node.path === activePath;
+        const statusLabel = fileStatusLabel(node.file.status);
         return (
           <li key={node.path}>
             <button
@@ -200,6 +266,17 @@ function RepositoryTreeRows({
             >
               <File size={13} className="shrink-0" />
               <span className="truncate font-mono">{node.name}</span>
+              {statusLabel && (
+                <span
+                  className={cn(
+                    "ml-auto inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded border px-1 text-[10px] font-semibold leading-none",
+                    fileStatusClassName(node.file.status),
+                  )}
+                  title={fileStatusTitle(node.file.status)}
+                >
+                  {statusLabel}
+                </span>
+              )}
             </button>
           </li>
         );
@@ -333,6 +410,7 @@ export function RepositoryExplorerPanel({
   const [selectedLine, setSelectedLine] = useState<number | null>(initialLine ?? null);
   const [content, setContent] = useState<RepositoryFileContent | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
+  const [changedOnly, setChangedOnly] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [loadingContent, setLoadingContent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -343,10 +421,17 @@ export function RepositoryExplorerPanel({
   const [blameByPath, setBlameByPath] = useState<Record<string, BlameCacheEntry>>({});
 
   const normalizedFilterQuery = filterQuery.trim().toLowerCase();
+  const changedFileCount = useMemo(
+    () => files.filter((file) => isChangedFileStatus(file.status)).length,
+    [files],
+  );
   const filteredFiles = useMemo(() => {
-    if (!normalizedFilterQuery) return files;
-    return files.filter((file) => file.path.toLowerCase().includes(normalizedFilterQuery));
-  }, [files, normalizedFilterQuery]);
+    return files.filter((file) => {
+      if (changedOnly && !isChangedFileStatus(file.status)) return false;
+      if (!normalizedFilterQuery) return true;
+      return file.path.toLowerCase().includes(normalizedFilterQuery);
+    });
+  }, [changedOnly, files, normalizedFilterQuery]);
   const tree = useMemo(() => buildTree(filteredFiles), [filteredFiles]);
   const allDirectoryPaths = useMemo(() => directoryPaths(tree), [tree]);
   const allVisibleDirectoriesCollapsed =
@@ -560,11 +645,25 @@ export function RepositoryExplorerPanel({
             />
           )}
         </div>
-        <div className="flex h-8 shrink-0 items-center justify-between border-t border-border px-3 text-[11px] text-muted-foreground">
-          <span>{files.length.toLocaleString()} files</span>
+        <div className="flex h-8 shrink-0 items-center justify-between gap-3 border-t border-border px-3 text-[11px] text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-2">
+            <span>{files.length.toLocaleString()} files</span>
+            <button
+              type="button"
+              className={cn(
+                "rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground",
+                changedOnly && "bg-muted text-foreground",
+              )}
+              onClick={() => setChangedOnly((current) => !current)}
+              disabled={changedFileCount === 0}
+              aria-pressed={changedOnly}
+            >
+              {changedFileCount.toLocaleString()} changed
+            </button>
+          </div>
           <button
             type="button"
-            className="text-muted-foreground hover:text-foreground"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
             onClick={handleToggleAllDirectories}
           >
             {allVisibleDirectoriesCollapsed ? "Expand all" : "Collapse all"}
