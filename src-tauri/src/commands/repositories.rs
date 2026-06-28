@@ -78,6 +78,13 @@ pub struct RepositoryFileContent {
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryFileDiff {
+    pub path: String,
+    pub raw_diff: String,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryBlameLine {
     pub line: u32,
     pub sha: String,
@@ -231,6 +238,14 @@ fn parse_git_status_porcelain_z(output: &str) -> BTreeMap<String, RepositoryFile
     }
 
     statuses
+}
+
+fn repository_statuses(repo_path: &Path) -> Result<BTreeMap<String, RepositoryFileStatus>, String> {
+    let status_output = run_git_checked_raw(
+        repo_path,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
+    Ok(parse_git_status_porcelain_z(&status_output))
 }
 
 fn list_branch_options(
@@ -440,6 +455,11 @@ fn safe_repo_file_path(repo_path: &Path, path: &str) -> Result<PathBuf, String> 
         return Err("Repository file path cannot escape the repository.".to_string());
     }
     Ok(canonical_file)
+}
+
+fn repo_relative_file_path(repo_path: &Path, path: &str) -> Result<PathBuf, String> {
+    validate_repo_relative_path(path)?;
+    Ok(repo_path.join(path))
 }
 
 fn short_sha(sha: &str) -> String {
@@ -662,11 +682,7 @@ pub fn list_repository_files(
 ) -> Result<Vec<RepositoryFileEntry>, String> {
     let repo_path = configured_repo(&workspace, &repo)?;
     let output = run_git_checked_raw(&repo_path, &["ls-files", "-z", "-co", "--exclude-standard"])?;
-    let status_output = run_git_checked_raw(
-        &repo_path,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-    let statuses = parse_git_status_porcelain_z(&status_output);
+    let statuses = repository_statuses(&repo_path)?;
     let mut files = output
         .split_terminator('\0')
         .filter(|path| !path.is_empty())
@@ -692,6 +708,58 @@ pub fn list_repository_files(
     }
 
     Ok(files.into_values().collect())
+}
+
+fn diff_untracked_file(repo_path: &Path, path: &str) -> Result<String, String> {
+    let file_path = repo_relative_file_path(repo_path, path)?;
+    let file_path_str = file_path.to_string_lossy().to_string();
+    let (code, stdout, stderr) = run_git(
+        repo_path,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-index",
+            "--",
+            "/dev/null",
+            &file_path_str,
+        ],
+    )?;
+    if code == Some(0) || code == Some(1) {
+        Ok(stdout)
+    } else {
+        Err(format!(
+            "git diff --no-index failed with code {:?}: {}{}",
+            code,
+            stderr.trim(),
+            if stdout.trim().is_empty() {
+                String::new()
+            } else {
+                format!("\nstdout: {}", stdout.trim())
+            }
+        ))
+    }
+}
+
+#[tauri::command]
+pub fn get_repository_file_diff(
+    workspace: String,
+    repo: String,
+    path: String,
+) -> Result<RepositoryFileDiff, String> {
+    let repo_path = configured_repo(&workspace, &repo)?;
+    validate_repo_relative_path(&path)?;
+    let statuses = repository_statuses(&repo_path)?;
+    let status = statuses
+        .get(&path)
+        .cloned()
+        .unwrap_or(RepositoryFileStatus::Unchanged);
+    let raw_diff = if status == RepositoryFileStatus::Untracked {
+        diff_untracked_file(&repo_path, &path)?
+    } else {
+        run_git_checked_raw(&repo_path, &["diff", "--no-ext-diff", "HEAD", "--", &path])?
+    };
+
+    Ok(RepositoryFileDiff { path, raw_diff })
 }
 
 #[tauri::command]

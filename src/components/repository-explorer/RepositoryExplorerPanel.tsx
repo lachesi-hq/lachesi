@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import type {
   RepositoryBlameLine,
   RepositoryFileContent,
+  RepositoryFileDiff,
   RepositoryFileEntry,
   RepositoryFileStatus,
 } from "@/types";
@@ -40,6 +41,14 @@ type BlameCacheEntry =
   | { status: "loading"; lines: RepositoryBlameLine[]; error: null }
   | { status: "ready"; lines: RepositoryBlameLine[]; error: null }
   | { status: "failed"; lines: RepositoryBlameLine[]; error: string };
+
+type FileDiffState =
+  | { status: "idle"; diff: null; error: null }
+  | { status: "loading"; diff: null; error: null }
+  | { status: "ready"; diff: RepositoryFileDiff; error: null }
+  | { status: "failed"; diff: null; error: string };
+
+type RepositoryViewerMode = "file" | "diff";
 
 export interface RepositoryExplorerPanelProps {
   workspace: string | null;
@@ -180,6 +189,75 @@ function fileStatusClassName(status: RepositoryFileStatus): string {
     case "unchanged":
       return "";
   }
+}
+
+function DiffLine({ line }: { line: string }) {
+  const isAdd = line.startsWith("+") && !line.startsWith("+++");
+  const isDelete = line.startsWith("-") && !line.startsWith("---");
+  const isHunk = line.startsWith("@@");
+  const isMeta =
+    line.startsWith("diff --git") ||
+    line.startsWith("index ") ||
+    line.startsWith("---") ||
+    line.startsWith("+++") ||
+    line.startsWith("new file mode") ||
+    line.startsWith("deleted file mode") ||
+    line.startsWith("rename from") ||
+    line.startsWith("rename to");
+
+  return (
+    <div
+      className={cn(
+        "repo-diff-line",
+        isAdd && "repo-diff-line--add",
+        isDelete && "repo-diff-line--delete",
+        isHunk && "repo-diff-line--hunk",
+        isMeta && "repo-diff-line--meta",
+      )}
+    >
+      <span className="repo-diff-prefix">{isAdd ? "+" : isDelete ? "-" : isHunk ? "@" : " "}</span>
+      <code className="repo-diff-content">{line}</code>
+    </div>
+  );
+}
+
+function RepositoryDiffViewer({ diffState }: { diffState: FileDiffState }) {
+  if (diffState.status === "loading") {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
+        Loading diff...
+      </div>
+    );
+  }
+  if (diffState.status === "failed") {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-destructive">
+        {diffState.error}
+      </div>
+    );
+  }
+  if (diffState.status !== "ready" || !diffState.diff.rawDiff.trim()) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+        No local diff for this file.
+      </div>
+    );
+  }
+
+  const lineOccurrences = new Map<string, number>();
+
+  return (
+    <div className="repo-code-viewer min-h-0 flex-1 overflow-auto">
+      <div className="min-w-max py-2">
+        {diffState.diff.rawDiff.split("\n").map((line) => {
+          const occurrence = (lineOccurrences.get(line) ?? 0) + 1;
+          lineOccurrences.set(line, occurrence);
+
+          return <DiffLine key={`${line}:${occurrence}`} line={line} />;
+        })}
+      </div>
+    </div>
+  );
 }
 
 function formatBlameTime(authorTime: number | null): string | null {
@@ -409,6 +487,12 @@ export function RepositoryExplorerPanel({
   const [selectedPath, setSelectedPath] = useState<string | null>(initialPath ?? null);
   const [selectedLine, setSelectedLine] = useState<number | null>(initialLine ?? null);
   const [content, setContent] = useState<RepositoryFileContent | null>(null);
+  const [viewerMode, setViewerMode] = useState<RepositoryViewerMode>("file");
+  const [fileDiffState, setFileDiffState] = useState<FileDiffState>({
+    status: "idle",
+    diff: null,
+    error: null,
+  });
   const [filterQuery, setFilterQuery] = useState("");
   const [changedOnly, setChangedOnly] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -438,6 +522,11 @@ export function RepositoryExplorerPanel({
     allDirectoryPaths.length > 0 &&
     allDirectoryPaths.every((path) => collapsedDirectories.has(path));
   const breadcrumbs = selectedPath?.split("/").filter(Boolean) ?? [];
+  const selectedFile = useMemo(
+    () => files.find((file) => file.path === selectedPath) ?? null,
+    [files, selectedPath],
+  );
+  const selectedFileHasChanges = selectedFile ? isChangedFileStatus(selectedFile.status) : false;
   const selectedBlameCache = selectedPath ? blameByPath[selectedPath] : undefined;
   const selectedBlame = useMemo(() => {
     if (!selectedLine || !selectedBlameCache) return null;
@@ -481,6 +570,14 @@ export function RepositoryExplorerPanel({
     setSelectedPath(initialPath ?? null);
     setSelectedLine(initialLine ?? null);
   }, [initialPath, initialLine]);
+
+  useEffect(() => {
+    if (!selectedPath) {
+      setViewerMode("file");
+      return;
+    }
+    setViewerMode(selectedFileHasChanges ? "diff" : "file");
+  }, [selectedFileHasChanges, selectedPath]);
 
   useEffect(() => {
     if (!workspace || !repo) return;
@@ -542,9 +639,39 @@ export function RepositoryExplorerPanel({
     };
   }, [workspace, repo, selectedPath]);
 
+  useEffect(() => {
+    if (!workspace || !repo || !selectedPath || !selectedFileHasChanges || viewerMode !== "diff") {
+      setFileDiffState({ status: "idle", diff: null, error: null });
+      return;
+    }
+
+    let cancelled = false;
+    setFileDiffState({ status: "loading", diff: null, error: null });
+    tauriCall<RepositoryFileDiff>("get_repository_file_diff", {
+      workspace,
+      repo,
+      path: selectedPath,
+    })
+      .then((diff) => {
+        if (!cancelled) setFileDiffState({ status: "ready", diff, error: null });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setFileDiffState({
+          status: "failed",
+          diff: null,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo, selectedFileHasChanges, selectedPath, viewerMode, workspace]);
+
   const handleSelectFile = (file: RepositoryFileEntry) => {
     setSelectedPath(file.path);
     setSelectedLine(null);
+    setViewerMode(isChangedFileStatus(file.status) ? "diff" : "file");
     setExternalOpenError(null);
     onSelectFile?.(file.path, null);
   };
@@ -699,6 +826,30 @@ export function RepositoryExplorerPanel({
             })}
           </div>
           <div className="flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground">
+            {selectedFileHasChanges && (
+              <div className="inline-flex rounded-md border border-border bg-muted p-0.5">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded px-2 py-0.5 hover:text-foreground",
+                    viewerMode === "file" && "bg-background text-foreground",
+                  )}
+                  onClick={() => setViewerMode("file")}
+                >
+                  File
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded px-2 py-0.5 hover:text-foreground",
+                    viewerMode === "diff" && "bg-background text-foreground",
+                  )}
+                  onClick={() => setViewerMode("diff")}
+                >
+                  Diff
+                </button>
+              </div>
+            )}
             {externalOpenError && (
               <span className="max-w-72 truncate text-destructive" title={externalOpenError}>
                 {externalOpenError}
@@ -723,7 +874,9 @@ export function RepositoryExplorerPanel({
             </span>
           </div>
         </header>
-        {contentError ? (
+        {viewerMode === "diff" && selectedFileHasChanges ? (
+          <RepositoryDiffViewer diffState={fileDiffState} />
+        ) : contentError ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
             {contentError}
           </div>

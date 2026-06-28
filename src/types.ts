@@ -52,6 +52,11 @@ export interface RepositoryFileContent {
   truncated: boolean;
 }
 
+export interface RepositoryFileDiff {
+  path: string;
+  rawDiff: string;
+}
+
 export interface RepositoryBlameLine {
   line: number;
   sha: string;
