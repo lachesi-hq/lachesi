@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RepositoryExplorerPanel } from "./RepositoryExplorerPanel";
@@ -121,5 +121,42 @@ describe("RepositoryExplorerPanel", () => {
 
     expect(onSelectFile).toHaveBeenLastCalledWith("src/App.tsx", null);
     expect(screen.queryByText("Grace Hopper")).not.toBeInTheDocument();
+  });
+
+  it("opens file search with Cmd+F and navigates matches", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <RepositoryExplorerPanel workspace="example-workspace" repo="frontend-app" />,
+    );
+
+    await screen.findByText(/showLocalDraft/);
+    await user.click(await screen.findByRole("button", { name: "File" }));
+    await screen.findByRole("button", { name: "Select line 4" });
+
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const findInput = await screen.findByRole("searchbox", { name: "Find in current file" });
+
+    await waitFor(() => {
+      expect(findInput).toHaveFocus();
+    });
+
+    await user.type(findInput, "OrderTable");
+
+    await waitFor(() => {
+      expect(screen.getByText("1/3")).toBeInTheDocument();
+      expect(container.querySelectorAll(".repo-find-match")).toHaveLength(3);
+    });
+    expect(container.querySelectorAll(".repo-find-match--active")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Next match" }));
+
+    expect(screen.getByText("2/3")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(
+      screen.queryByRole("searchbox", { name: "Find in current file" }),
+    ).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".repo-find-match")).toHaveLength(0);
   });
 });

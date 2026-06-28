@@ -1,11 +1,14 @@
 import {
+  ArrowDown,
   ArrowSquareOut,
+  ArrowUp,
   CaretDown,
   CaretRight,
   File,
   Folder,
   FolderOpen,
   MagnifyingGlass,
+  X,
 } from "@phosphor-icons/react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -49,6 +52,17 @@ type FileDiffState =
   | { status: "failed"; diff: null; error: string };
 
 type RepositoryViewerMode = "file" | "diff";
+
+type FindMatch = {
+  id: string;
+  lineIndex: number;
+  start: number;
+  end: number;
+};
+
+type LineFindMatch = FindMatch & {
+  active: boolean;
+};
 
 export interface RepositoryExplorerPanelProps {
   workspace: string | null;
@@ -125,6 +139,88 @@ function renderHighlightedNodes(nodes: HighlightNode[], keyPrefix: string): Reac
   });
 }
 
+function findTextMatches(lines: string[], query: string): FindMatch[] {
+  if (query.length === 0) return [];
+  const needle = query.toLowerCase();
+  const matches: FindMatch[] = [];
+
+  lines.forEach((line, lineIndex) => {
+    const haystack = line.toLowerCase();
+    let searchFrom = 0;
+    let lineMatchIndex = 0;
+    while (searchFrom <= line.length) {
+      const start = haystack.indexOf(needle, searchFrom);
+      if (start === -1) break;
+      const end = start + query.length;
+      matches.push({
+        id: `${lineIndex + 1}:${lineMatchIndex + 1}:${start}`,
+        lineIndex,
+        start,
+        end,
+      });
+      searchFrom = end;
+      lineMatchIndex += 1;
+    }
+  });
+
+  return matches;
+}
+
+function groupFindMatchesByLine(
+  matches: FindMatch[],
+  activeMatchId: string | null,
+): Map<number, LineFindMatch[]> {
+  const grouped = new Map<number, LineFindMatch[]>();
+  for (const match of matches) {
+    const current = grouped.get(match.lineIndex) ?? [];
+    current.push({ ...match, active: match.id === activeMatchId });
+    grouped.set(match.lineIndex, current);
+  }
+  return grouped;
+}
+
+function renderTextWithFindHighlights(
+  text: string,
+  matches: LineFindMatch[],
+  keyPrefix: string,
+): React.ReactNode {
+  if (matches.length === 0) return text;
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+
+  for (const match of matches) {
+    if (match.start > cursor) {
+      nodes.push(
+        <span key={`${keyPrefix}:text:${cursor}:${match.start}`}>
+          {text.slice(cursor, match.start)}
+        </span>,
+      );
+    }
+    nodes.push(
+      <mark
+        key={`${keyPrefix}:match:${match.id}`}
+        className={cn("repo-find-match", match.active && "repo-find-match--active")}
+        data-find-current={match.active ? "true" : undefined}
+      >
+        {text.slice(match.start, match.end)}
+      </mark>,
+    );
+    cursor = match.end;
+  }
+
+  if (cursor < text.length) {
+    nodes.push(<span key={`${keyPrefix}:text:${cursor}:end`}>{text.slice(cursor)}</span>);
+  }
+
+  return nodes;
+}
+
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+}
+
 function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -191,7 +287,7 @@ function fileStatusClassName(status: RepositoryFileStatus): string {
   }
 }
 
-function DiffLine({ line }: { line: string }) {
+function DiffLine({ line, findMatches }: { line: string; findMatches: LineFindMatch[] }) {
   const isAdd = line.startsWith("+") && !line.startsWith("+++");
   const isDelete = line.startsWith("-") && !line.startsWith("---");
   const isHunk = line.startsWith("@@");
@@ -216,12 +312,32 @@ function DiffLine({ line }: { line: string }) {
       )}
     >
       <span className="repo-diff-prefix">{isAdd ? "+" : isDelete ? "-" : isHunk ? "@" : " "}</span>
-      <code className="repo-diff-content">{line}</code>
+      <code className="repo-diff-content">
+        {renderTextWithFindHighlights(line, findMatches, `diff:${line}`)}
+      </code>
     </div>
   );
 }
 
-function RepositoryDiffViewer({ diffState }: { diffState: FileDiffState }) {
+function RepositoryDiffViewer({
+  diffState,
+  findMatchesByLine,
+  activeFindMatchId,
+}: {
+  diffState: FileDiffState;
+  findMatchesByLine: Map<number, LineFindMatch[]>;
+  activeFindMatchId: string | null;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!activeFindMatchId || !scrollRef.current) return;
+    const target = scrollRef.current.querySelector('[data-find-current="true"]');
+    if (target instanceof HTMLElement && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "center" });
+    }
+  }, [activeFindMatchId]);
+
   if (diffState.status === "loading") {
     return (
       <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
@@ -247,13 +363,19 @@ function RepositoryDiffViewer({ diffState }: { diffState: FileDiffState }) {
   const lineOccurrences = new Map<string, number>();
 
   return (
-    <div className="repo-code-viewer min-h-0 flex-1 overflow-auto">
+    <div ref={scrollRef} className="repo-code-viewer min-h-0 flex-1 overflow-auto">
       <div className="min-w-max py-2">
-        {diffState.diff.rawDiff.split("\n").map((line) => {
+        {diffState.diff.rawDiff.split("\n").map((line, lineIndex) => {
           const occurrence = (lineOccurrences.get(line) ?? 0) + 1;
           lineOccurrences.set(line, occurrence);
 
-          return <DiffLine key={`${line}:${occurrence}`} line={line} />;
+          return (
+            <DiffLine
+              key={`${line}:${occurrence}`}
+              line={line}
+              findMatches={findMatchesByLine.get(lineIndex) ?? []}
+            />
+          );
         })}
       </div>
     </div>
@@ -371,6 +493,8 @@ function RepositoryCodeViewer({
   selectedBlame,
   blameLoading,
   blameError,
+  findMatchesByLine,
+  activeFindMatchId,
   onSelectLine,
 }: {
   file: RepositoryFileContent | null;
@@ -380,6 +504,8 @@ function RepositoryCodeViewer({
   selectedBlame: RepositoryBlameLine | null;
   blameLoading: boolean;
   blameError: string | null;
+  findMatchesByLine: Map<number, LineFindMatch[]>;
+  activeFindMatchId: string | null;
   onSelectLine: (line: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -397,6 +523,14 @@ function RepositoryCodeViewer({
       target.scrollIntoView({ block: "center" });
     }
   }, [filePath, selectedLine]);
+
+  useEffect(() => {
+    if (!activeFindMatchId || !scrollRef.current) return;
+    const target = scrollRef.current.querySelector('[data-find-current="true"]');
+    if (target instanceof HTMLElement && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "center" });
+    }
+  }, [activeFindMatchId]);
 
   if (!file) {
     return (
@@ -420,6 +554,7 @@ function RepositoryCodeViewer({
               : null;
           const commitMessage =
             selectedBlame?.message?.trim() || selectedBlame?.summary?.trim() || null;
+          const findMatches = findMatchesByLine.get(index) ?? [];
           return (
             <div key={`${file.path}:${lineNumber}`} data-line={lineNumber}>
               <button
@@ -430,7 +565,11 @@ function RepositoryCodeViewer({
               >
                 <span className="repo-code-gutter">{lineNumber}</span>
                 <code className="repo-code-content">
-                  {highlighted ? renderHighlightedNodes(highlighted, `${lineNumber}`) : line}
+                  {findMatches.length > 0
+                    ? renderTextWithFindHighlights(line, findMatches, `${file.path}:${lineNumber}`)
+                    : highlighted
+                      ? renderHighlightedNodes(highlighted, `${lineNumber}`)
+                      : line}
                 </code>
               </button>
               {active && (
@@ -503,6 +642,10 @@ export function RepositoryExplorerPanel({
   const [openingExternalFile, setOpeningExternalFile] = useState(false);
   const [collapsedDirectories, setCollapsedDirectories] = useState<Set<string>>(() => new Set());
   const [blameByPath, setBlameByPath] = useState<Record<string, BlameCacheEntry>>({});
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [activeFindIndex, setActiveFindIndex] = useState(0);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
 
   const normalizedFilterQuery = filterQuery.trim().toLowerCase();
   const changedFileCount = useMemo(
@@ -527,6 +670,21 @@ export function RepositoryExplorerPanel({
     [files, selectedPath],
   );
   const selectedFileHasChanges = selectedFile ? isChangedFileStatus(selectedFile.status) : false;
+  const searchableLines = useMemo(() => {
+    if (viewerMode === "diff" && fileDiffState.status === "ready") {
+      return fileDiffState.diff.rawDiff.split("\n");
+    }
+    return content?.content.split("\n") ?? [];
+  }, [content, fileDiffState, viewerMode]);
+  const findMatches = useMemo(
+    () => findTextMatches(searchableLines, findOpen ? findQuery : ""),
+    [findOpen, findQuery, searchableLines],
+  );
+  const activeFindMatch = findMatches[activeFindIndex] ?? null;
+  const findMatchesByLine = useMemo(
+    () => groupFindMatchesByLine(findMatches, activeFindMatch?.id ?? null),
+    [activeFindMatch?.id, findMatches],
+  );
   const selectedBlameCache = selectedPath ? blameByPath[selectedPath] : undefined;
   const selectedBlame = useMemo(() => {
     if (!selectedLine || !selectedBlameCache) return null;
@@ -565,6 +723,68 @@ export function RepositoryExplorerPanel({
     },
     [blameByPath, repo, workspace],
   );
+
+  const focusFindInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    });
+  }, []);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    setActiveFindIndex(0);
+  }, []);
+
+  const moveFindSelection = useCallback(
+    (direction: 1 | -1) => {
+      setActiveFindIndex((current) => {
+        const total = findMatches.length;
+        if (total === 0) return 0;
+        return (current + direction + total) % total;
+      });
+    },
+    [findMatches.length],
+  );
+
+  useEffect(() => {
+    if (!findOpen) return;
+    focusFindInput();
+  }, [findOpen, focusFindInput]);
+
+  useEffect(() => {
+    setActiveFindIndex((current) => {
+      if (findMatches.length === 0) return 0;
+      return Math.min(current, findMatches.length - 1);
+    });
+  }, [findMatches.length]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const targetIsFindInput = event.target === findInputRef.current;
+      const targetIsEditable = isEditableShortcutTarget(event.target);
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        event.key.toLowerCase() === "f" &&
+        (!targetIsEditable || targetIsFindInput)
+      ) {
+        event.preventDefault();
+        setFindOpen(true);
+        focusFindInput();
+        return;
+      }
+
+      if (event.key === "Escape" && findOpen && (!targetIsEditable || targetIsFindInput)) {
+        event.preventDefault();
+        closeFind();
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [closeFind, findOpen, focusFindInput]);
 
   useEffect(() => {
     setSelectedPath(initialPath ?? null);
@@ -672,6 +892,7 @@ export function RepositoryExplorerPanel({
     setSelectedPath(file.path);
     setSelectedLine(null);
     setViewerMode(isChangedFileStatus(file.status) ? "diff" : "file");
+    setActiveFindIndex(0);
     setExternalOpenError(null);
     onSelectFile?.(file.path, null);
   };
@@ -826,6 +1047,68 @@ export function RepositoryExplorerPanel({
             })}
           </div>
           <div className="flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground">
+            {findOpen && (
+              <div className="repo-find-bar">
+                <MagnifyingGlass size={13} className="shrink-0 text-muted-foreground" />
+                <input
+                  ref={findInputRef}
+                  type="search"
+                  value={findQuery}
+                  onChange={(event) => {
+                    setFindQuery(event.target.value);
+                    setActiveFindIndex(0);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      moveFindSelection(event.shiftKey ? -1 : 1);
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      closeFind();
+                    }
+                  }}
+                  placeholder="Find in file..."
+                  aria-label="Find in current file"
+                  className="repo-find-input"
+                />
+                <span className="w-14 text-right tabular-nums">
+                  {findQuery.length === 0
+                    ? "0/0"
+                    : findMatches.length === 0
+                      ? "0/0"
+                      : `${activeFindIndex + 1}/${findMatches.length}`}
+                </span>
+                <button
+                  type="button"
+                  className="repo-find-button"
+                  onClick={() => moveFindSelection(-1)}
+                  disabled={findMatches.length === 0}
+                  aria-label="Previous match"
+                  title="Previous match"
+                >
+                  <ArrowUp size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="repo-find-button"
+                  onClick={() => moveFindSelection(1)}
+                  disabled={findMatches.length === 0}
+                  aria-label="Next match"
+                  title="Next match"
+                >
+                  <ArrowDown size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="repo-find-button"
+                  onClick={closeFind}
+                  aria-label="Close find"
+                  title="Close find"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )}
             {selectedFileHasChanges && (
               <div className="inline-flex rounded-md border border-border bg-muted p-0.5">
                 <button
@@ -875,7 +1158,11 @@ export function RepositoryExplorerPanel({
           </div>
         </header>
         {viewerMode === "diff" && selectedFileHasChanges ? (
-          <RepositoryDiffViewer diffState={fileDiffState} />
+          <RepositoryDiffViewer
+            diffState={fileDiffState}
+            findMatchesByLine={findMatchesByLine}
+            activeFindMatchId={activeFindMatch?.id ?? null}
+          />
         ) : contentError ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
             {contentError}
@@ -889,6 +1176,8 @@ export function RepositoryExplorerPanel({
             selectedBlame={selectedBlame}
             blameLoading={blameLoading}
             blameError={blameError}
+            findMatchesByLine={findMatchesByLine}
+            activeFindMatchId={activeFindMatch?.id ?? null}
             onSelectLine={handleSelectLine}
           />
         )}
