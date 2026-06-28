@@ -668,7 +668,7 @@ function RepositoryCodeViewer({
 }
 
 function RepositoryMarkdownPreview({ file }: { file: RepositoryFileContent | null }) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(true);
   const headingIdPrefix = useMemo(
     () => `repo-md-${markdownHeadingSlug(file?.path ?? "markdown")}`,
@@ -681,7 +681,7 @@ function RepositoryMarkdownPreview({ file }: { file: RepositoryFileContent | nul
 
   const handleSelectHeading = (id: string) => {
     const target = document.getElementById(id);
-    const container = target?.closest(".repo-markdown-viewer") ?? scrollRef.current;
+    const container = contentScrollRef.current;
     if (!(container instanceof HTMLElement) || !(target instanceof HTMLElement)) return;
 
     const containerRect = container.getBoundingClientRect();
@@ -704,45 +704,50 @@ function RepositoryMarkdownPreview({ file }: { file: RepositoryFileContent | nul
   }
 
   return (
-    <div ref={scrollRef} className="repo-markdown-viewer min-h-0 flex-1 overflow-auto">
-      <div className="repo-markdown-layout">
+    <div
+      className={cn(
+        "repo-markdown-viewer min-h-0 flex-1",
+        !outlineOpen && "repo-markdown-viewer--outline-collapsed",
+      )}
+    >
+      <div ref={contentScrollRef} className="repo-markdown-content-scroll">
         <Markdown className="repo-markdown-content" headingIdPrefix={headingIdPrefix}>
           {file.content}
         </Markdown>
-        <aside className="repo-markdown-outline" aria-label="Markdown outline">
-          <button
-            type="button"
-            className="repo-markdown-outline-toggle"
-            onClick={() => setOutlineOpen((current) => !current)}
-            aria-expanded={outlineOpen}
-            aria-label={outlineOpen ? "Collapse headings map" : "Expand headings map"}
-          >
-            <ListBullets size={14} />
-            <span>{outlineOpen ? "Headings" : "Map"}</span>
-            {outlineOpen ? <CaretDown size={12} /> : <CaretRight size={12} />}
-          </button>
-          {outlineOpen && (
-            <nav className="repo-markdown-outline-list" aria-label="Markdown headings">
-              {headings.length > 0 ? (
-                headings.map((heading) => (
-                  <button
-                    key={heading.id}
-                    type="button"
-                    className="repo-markdown-outline-item"
-                    style={{ paddingLeft: 8 + Math.max(0, heading.level - 1) * 12 }}
-                    onClick={() => handleSelectHeading(heading.id)}
-                    title={heading.text}
-                  >
-                    {heading.text}
-                  </button>
-                ))
-              ) : (
-                <span className="repo-markdown-outline-empty">No headings</span>
-              )}
-            </nav>
-          )}
-        </aside>
       </div>
+      <aside className="repo-markdown-outline" aria-label="Markdown outline">
+        <button
+          type="button"
+          className="repo-markdown-outline-toggle"
+          onClick={() => setOutlineOpen((current) => !current)}
+          aria-expanded={outlineOpen}
+          aria-label={outlineOpen ? "Collapse headings map" : "Expand headings map"}
+        >
+          <ListBullets size={14} />
+          <span>{outlineOpen ? "Headings" : "Map"}</span>
+          {outlineOpen ? <CaretDown size={12} /> : <CaretRight size={12} />}
+        </button>
+        {outlineOpen && (
+          <nav className="repo-markdown-outline-list" aria-label="Markdown headings">
+            {headings.length > 0 ? (
+              headings.map((heading) => (
+                <button
+                  key={heading.id}
+                  type="button"
+                  className="repo-markdown-outline-item"
+                  style={{ paddingLeft: 8 + Math.max(0, heading.level - 1) * 12 }}
+                  onClick={() => handleSelectHeading(heading.id)}
+                  title={heading.text}
+                >
+                  {heading.text}
+                </button>
+              ))
+            ) : (
+              <span className="repo-markdown-outline-empty">No headings</span>
+            )}
+          </nav>
+        )}
+      </aside>
     </div>
   );
 }

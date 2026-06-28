@@ -362,8 +362,10 @@ body {
 }
 
 .repo-markdown-viewer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16rem;
   background: var(--background);
-  padding: 1.5rem 2rem 2.5rem;
+  overflow: hidden;
   --repo-md-accent-strong: #b83a00;
   --repo-md-accent: #8a5a1d;
   --repo-md-accent-soft: color-mix(in srgb, var(--repo-md-accent) 12%, transparent);
@@ -381,11 +383,14 @@ body {
   --repo-md-code-text: color-mix(in srgb, var(--foreground) 90%, var(--repo-md-accent));
 }
 
-.repo-markdown-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 48rem) 14rem;
-  gap: 2rem;
-  align-items: start;
+.repo-markdown-viewer--outline-collapsed {
+  grid-template-columns: minmax(0, 1fr) 4.25rem;
+}
+
+.repo-markdown-content-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding: 1.5rem 2rem 2.5rem;
 }
 
 .repo-markdown-viewer .lachesi-md {
@@ -450,12 +455,10 @@ body {
 }
 
 .repo-markdown-outline {
-  position: sticky;
-  top: 0;
-  max-height: calc(100vh - 7rem);
+  min-height: 0;
   overflow: auto;
   border-left: 1px solid var(--border);
-  padding-left: 0.75rem;
+  padding: 1.5rem 0.75rem 1rem;
   color: var(--muted-foreground);
   font-size: 0.75rem;
 }
@@ -514,17 +517,21 @@ body {
 }
 
 @media (max-width: 1100px) {
-  .repo-markdown-layout {
+  .repo-markdown-viewer,
+  .repo-markdown-viewer--outline-collapsed {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .repo-markdown-content-scroll {
+    padding: 1.25rem 1.5rem 2rem;
   }
 
   .repo-markdown-outline {
     order: -1;
-    position: static;
     max-height: none;
     border-left: 0;
     border-bottom: 1px solid var(--border);
-    padding: 0 0 0.75rem;
+    padding: 0.75rem 1.5rem;
   }
 }
 
