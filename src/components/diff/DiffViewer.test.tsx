@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type FileData, fileKey, parseUnifiedDiff } from "@/lib/diff";
 import { DiffViewer } from "./DiffViewer";
 
@@ -72,5 +72,28 @@ describe("DiffViewer", () => {
     await user.click(screen.getByRole("button", { name: "Expand all folders" }));
 
     expect(within(fileTree).getByRole("button", { name: /App\.tsx/ })).toBeInTheDocument();
+  });
+
+  it("exposes an AI action for changed diff lines", async () => {
+    const user = userEvent.setup();
+    const onAskLine = vi.fn();
+    render(
+      <DiffViewer
+        files={files}
+        viewMode="unified"
+        onViewModeChange={() => {}}
+        onAskLine={onAskLine}
+      />,
+    );
+
+    await user.click(screen.getAllByLabelText("Ask AI about this line")[0]);
+
+    expect(onAskLine).toHaveBeenCalledWith(
+      files[0],
+      expect.objectContaining({
+        side: "old",
+        change: expect.objectContaining({ content: "old app" }),
+      }),
+    );
   });
 });

@@ -145,6 +145,15 @@ export interface AiReviewContext {
   jiraContext: string | null;
 }
 
+export interface AiLineQuestionContext {
+  path: string;
+  side: "new" | "old";
+  to: number | null;
+  from: number | null;
+  lineText: string;
+  hunkDiff: string;
+}
+
 export type AiReviewRunStatus = "idle" | "running" | "succeeded" | "failed" | "cancelled";
 export type AiReviewTurnKind = "initial" | "reply";
 export type AiReviewMessageRole = "user" | "assistant";

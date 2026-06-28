@@ -34,6 +34,8 @@ export interface DiffViewerProps {
   onToggleFileViewed?: (file: FileData) => void;
   /** Called when a line gutter is clicked, to open a comment composer. */
   onGutterClick?: (file: FileData, args: ChangeEventArgs) => void;
+  /** Called when the AI gutter action is clicked for a diff line. */
+  onAskLine?: (file: FileData, args: ChangeEventArgs) => void;
 }
 
 export function DiffViewer({
@@ -47,6 +49,7 @@ export function DiffViewer({
   viewedFileKeys,
   onToggleFileViewed,
   onGutterClick,
+  onAskLine,
 }: DiffViewerProps) {
   const [showFiles, setShowFiles] = useState(true);
   const [activeFileKey, setActiveFileKey] = useState<string | null>(() =>
@@ -244,6 +247,7 @@ export function DiffViewer({
               widgets={widgetsByFile?.[fileKey(file)]}
               fileComments={fileWidgets?.[fileKey(file)]}
               onGutterClick={onGutterClick}
+              onAskLine={onAskLine}
               onToggleViewed={handleToggleFileViewed}
               onToggleCollapsed={handleToggleFileCollapsed}
             />
