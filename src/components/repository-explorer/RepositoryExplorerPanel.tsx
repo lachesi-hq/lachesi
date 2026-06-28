@@ -7,12 +7,13 @@ import {
   File,
   Folder,
   FolderOpen,
+  ListBullets,
   MagnifyingGlass,
   X,
 } from "@phosphor-icons/react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Markdown } from "@/components/Markdown";
+import { Markdown, markdownHeadingId, markdownHeadingSlug } from "@/components/Markdown";
 import { type HighlightNode, highlightCode } from "@/lib/highlight";
 import { tauriCall } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,12 @@ type FileDiffState =
 
 type RepositoryViewerMode = "file" | "diff";
 type MarkdownViewerMode = "source" | "rendered";
+
+type MarkdownHeading = {
+  id: string;
+  level: number;
+  text: string;
+};
 
 type FindMatch = {
   id: string;
@@ -226,6 +233,44 @@ function isEditableShortcutTarget(target: EventTarget | null): boolean {
 function isMarkdownPath(path: string | null | undefined): boolean {
   if (!path) return false;
   return /\.(md|markdown)$/i.test(path);
+}
+
+function markdownHeadingText(value: string): string {
+  return value
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[*_~]/g, "")
+    .trim();
+}
+
+function parseMarkdownHeadings(markdown: string, idPrefix: string): MarkdownHeading[] {
+  const headings: MarkdownHeading[] = [];
+  const seen = new Map<string, number>();
+  let inFence = false;
+
+  for (const line of markdown.split("\n")) {
+    if (/^\s*```/.test(line) || /^\s*~~~/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+
+    const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!match) continue;
+    const text = markdownHeadingText(match[2] ?? "");
+    if (!text) continue;
+
+    const slug = markdownHeadingSlug(text);
+    const occurrence = (seen.get(slug) ?? 0) + 1;
+    seen.set(slug, occurrence);
+    headings.push({
+      id: markdownHeadingId(idPrefix, text, occurrence),
+      level: match[1]?.length ?? 1,
+      text,
+    });
+  }
+
+  return headings;
 }
 
 function formatBytes(size: number): string {
@@ -623,6 +668,33 @@ function RepositoryCodeViewer({
 }
 
 function RepositoryMarkdownPreview({ file }: { file: RepositoryFileContent | null }) {
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  const headingIdPrefix = useMemo(
+    () => `repo-md-${markdownHeadingSlug(file?.path ?? "markdown")}`,
+    [file?.path],
+  );
+  const headings = useMemo(
+    () => (file ? parseMarkdownHeadings(file.content, headingIdPrefix) : []),
+    [file, headingIdPrefix],
+  );
+
+  const handleSelectHeading = (id: string) => {
+    const target = document.getElementById(id);
+    const container = contentScrollRef.current;
+    if (!(container instanceof HTMLElement) || !(target instanceof HTMLElement)) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const top = container.scrollTop + targetRect.top - containerRect.top - 16;
+
+    container.scrollTop = top;
+    container.scrollTo({ top, behavior: "auto" });
+    requestAnimationFrame(() => {
+      container.scrollTop = top;
+    });
+  };
+
   if (!file) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
@@ -632,8 +704,50 @@ function RepositoryMarkdownPreview({ file }: { file: RepositoryFileContent | nul
   }
 
   return (
-    <div className="repo-markdown-viewer min-h-0 flex-1 overflow-auto">
-      <Markdown>{file.content}</Markdown>
+    <div
+      className={cn(
+        "repo-markdown-viewer min-h-0 flex-1",
+        !outlineOpen && "repo-markdown-viewer--outline-collapsed",
+      )}
+    >
+      <div ref={contentScrollRef} className="repo-markdown-content-scroll">
+        <Markdown className="repo-markdown-content" headingIdPrefix={headingIdPrefix}>
+          {file.content}
+        </Markdown>
+      </div>
+      <aside className="repo-markdown-outline" aria-label="Markdown outline">
+        <button
+          type="button"
+          className="repo-markdown-outline-toggle"
+          onClick={() => setOutlineOpen((current) => !current)}
+          aria-expanded={outlineOpen}
+          aria-label={outlineOpen ? "Collapse headings map" : "Expand headings map"}
+        >
+          <ListBullets size={14} />
+          <span>{outlineOpen ? "Headings" : "Map"}</span>
+          {outlineOpen ? <CaretDown size={12} /> : <CaretRight size={12} />}
+        </button>
+        {outlineOpen && (
+          <nav className="repo-markdown-outline-list" aria-label="Markdown headings">
+            {headings.length > 0 ? (
+              headings.map((heading) => (
+                <button
+                  key={heading.id}
+                  type="button"
+                  className="repo-markdown-outline-item"
+                  style={{ paddingLeft: 8 + Math.max(0, heading.level - 1) * 12 }}
+                  onClick={() => handleSelectHeading(heading.id)}
+                  title={heading.text}
+                >
+                  {heading.text}
+                </button>
+              ))
+            ) : (
+              <span className="repo-markdown-outline-empty">No headings</span>
+            )}
+          </nav>
+        )}
+      </aside>
     </div>
   );
 }

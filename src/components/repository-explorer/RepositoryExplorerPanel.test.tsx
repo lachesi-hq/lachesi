@@ -185,6 +185,17 @@ describe("RepositoryExplorerPanel", () => {
     );
     expect(screen.getByText("pnpm dev")).toBeInTheDocument();
     expect(screen.getByText("export const preview = true;")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Markdown headings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Frontend app" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Usage" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Collapse headings map" }));
+
+    expect(screen.queryByRole("navigation", { name: "Markdown headings" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand headings map" }));
+
+    expect(screen.getByRole("navigation", { name: "Markdown headings" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Source" }));
 
