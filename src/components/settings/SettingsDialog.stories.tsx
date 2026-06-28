@@ -35,8 +35,11 @@ const meta = {
     repos: SAMPLE_REPOS,
     defaultDiffView: "unified",
     reviewTerminal: "wezterm",
+    aiProvider: "claude",
     claudeModel: "sonnet",
     claudeEffort: "high",
+    codexModel: null,
+    codexEffort: null,
     reviewTerminalOptions: REVIEW_TERMINAL_OPTIONS,
     jiraBaseUrl: "https://example.atlassian.net",
     menuBarSyncEnabled: true,
@@ -73,8 +76,11 @@ function Harness({
         repos={repos}
         defaultDiffView="unified"
         reviewTerminal={null}
+        aiProvider="claude"
         claudeModel={null}
         claudeEffort={null}
+        codexModel={null}
+        codexEffort={null}
         reviewTerminalOptions={REVIEW_TERMINAL_OPTIONS}
         jiraBaseUrl="https://example.atlassian.net"
         menuBarSyncEnabled={true}

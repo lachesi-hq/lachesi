@@ -403,8 +403,10 @@ export type PrListFilter = "OPEN" | "DRAFT" | "MERGED" | "ALL";
 
 export type DiffViewMode = "unified" | "split" | "conversation";
 export type ReviewTerminal = "wezterm" | "iterm" | "terminal";
+export type AiProvider = "claude" | "codex";
 export type ClaudeReviewModel = "sonnet" | "opus" | "fable";
 export type ClaudeReviewEffort = "low" | "medium" | "high" | "xhigh" | "max";
+export type CodexReviewEffort = "low" | "medium" | "high";
 
 export interface ReviewTerminalOption {
   id: ReviewTerminal;
@@ -417,8 +419,11 @@ export interface AppConfig {
   defaultDiffView: DiffViewMode;
   theme: "light" | "dark";
   reviewTerminal: ReviewTerminal | null;
+  aiProvider: AiProvider;
   claudeModel: ClaudeReviewModel | null;
   claudeEffort: ClaudeReviewEffort | null;
+  codexModel: string | null;
+  codexEffort: CodexReviewEffort | null;
   jiraBaseUrl: string | null;
   menuBarSyncEnabled: boolean;
   notificationsEnabled: boolean;

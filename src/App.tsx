@@ -182,8 +182,11 @@ export default function App() {
           payload,
           sourceBranch: detail.sourceBranch,
           destinationBranch: detail.destinationBranch,
+          aiProvider: config?.aiProvider ?? "claude",
           claudeModel: config?.claudeModel ?? null,
           claudeEffort: config?.claudeEffort ?? null,
+          codexModel: config?.codexModel ?? null,
+          codexEffort: config?.codexEffort ?? null,
         });
         await updateJob("running", started.threadId);
 
@@ -239,8 +242,11 @@ export default function App() {
       activeSel,
       aiReview.refreshStore,
       backgroundReviewPrKey,
+      config?.aiProvider,
       config?.claudeEffort,
       config?.claudeModel,
+      config?.codexEffort,
+      config?.codexModel,
       config?.hasJira,
       config?.jiraBaseUrl,
       notifyReviewFinished,
@@ -577,8 +583,11 @@ export default function App() {
           title: contextForReview.pr.title || `PR #${selectionForReview.prId}`,
           sourceBranch: contextForReview.pr.sourceBranch,
           destinationBranch: contextForReview.pr.destinationBranch,
+          aiProvider: config?.aiProvider ?? "claude",
           claudeModel: config?.claudeModel ?? null,
           claudeEffort: config?.claudeEffort ?? null,
+          codexModel: config?.codexModel ?? null,
+          codexEffort: config?.codexEffort ?? null,
         });
 
         let finalState: AiReviewRunState | null = null;
@@ -629,8 +638,11 @@ export default function App() {
           threadId: aiReview.activeThread.id,
           userMessage: request.displayMessage,
           basePayload: request.payload,
+          aiProvider: config?.aiProvider ?? "claude",
           claudeModel: config?.claudeModel ?? null,
           claudeEffort: config?.claudeEffort ?? null,
+          codexModel: config?.codexModel ?? null,
+          codexEffort: config?.codexEffort ?? null,
         });
       } else {
         handleRunInlineReview(request.payload, request.displayMessage);
@@ -669,8 +681,11 @@ export default function App() {
         threadId,
         userMessage,
         basePayload,
+        aiProvider: config?.aiProvider ?? "claude",
         claudeModel: config?.claudeModel ?? null,
         claudeEffort: config?.claudeEffort ?? null,
+        codexModel: config?.codexModel ?? null,
+        codexEffort: config?.codexEffort ?? null,
       });
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
@@ -819,8 +834,11 @@ export default function App() {
     repos: nextRepos,
     defaultDiffView,
     reviewTerminal,
+    aiProvider,
     claudeModel,
     claudeEffort,
+    codexModel,
+    codexEffort,
     jiraBaseUrl,
     menuBarSyncEnabled,
     notificationsEnabled,
@@ -839,8 +857,11 @@ export default function App() {
       defaultDiffView,
       theme,
       reviewTerminal,
+      aiProvider,
       claudeModel,
       claudeEffort,
+      codexModel,
+      codexEffort,
       jiraBaseUrl,
       menuBarSyncEnabled,
       notificationsEnabled,
@@ -876,6 +897,7 @@ export default function App() {
               activeThread={aiReview.activeThread}
               activeRun={aiReview.activeRun}
               reviewState={aiReview.state}
+              aiProvider={config?.aiProvider ?? "claude"}
               loading={aiReview.loading}
               error={aiReview.error}
               onRun={aiReviewContext ? handleRunNewReview : undefined}
@@ -948,8 +970,11 @@ export default function App() {
               repos={repos}
               defaultDiffView={config?.defaultDiffView ?? "unified"}
               reviewTerminal={config?.reviewTerminal ?? null}
+              aiProvider={config?.aiProvider ?? "claude"}
               claudeModel={config?.claudeModel ?? null}
               claudeEffort={config?.claudeEffort ?? null}
+              codexModel={config?.codexModel ?? null}
+              codexEffort={config?.codexEffort ?? null}
               reviewTerminalOptions={reviewTerminalOptions}
               jiraBaseUrl={config?.jiraBaseUrl ?? null}
               menuBarSyncEnabled={config?.menuBarSyncEnabled ?? true}

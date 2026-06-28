@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { tauriCall } from "@/lib/tauri";
 import type {
+  AiProvider,
   AppConfig,
   ClaudeReviewEffort,
   ClaudeReviewModel,
+  CodexReviewEffort,
   DiffViewMode,
   RepoRef,
   ReviewTerminal,
@@ -14,8 +16,11 @@ export type SaveConfigInput = {
   defaultDiffView: DiffViewMode;
   theme: "light" | "dark";
   reviewTerminal: ReviewTerminal | null;
+  aiProvider: AiProvider;
   claudeModel: ClaudeReviewModel | null;
   claudeEffort: ClaudeReviewEffort | null;
+  codexModel: string | null;
+  codexEffort: CodexReviewEffort | null;
   jiraBaseUrl: string | null;
   menuBarSyncEnabled: boolean;
   notificationsEnabled: boolean;

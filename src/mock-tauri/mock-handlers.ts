@@ -731,6 +731,8 @@ export const mockHandlers: Record<string, Handler> = {
     const threadId = nowId("thread");
     const now = String(Date.now());
     const displayMessage = String(args?.displayMessage ?? "").trim();
+    const aiProvider = String(args?.aiProvider ?? "claude") === "codex" ? "codex" : "claude";
+    const providerLabel = aiProvider === "codex" ? "Codex" : "Claude";
     const nextStore: AiReviewStore = {
       activeThreadId: threadId,
       threads: [
@@ -756,8 +758,19 @@ export const mockHandlers: Record<string, Handler> = {
         "Starting AI review…",
         `Reviewing PR: ${title}`,
         `Saving output to review thread ${threadId}.`,
-        ...(args?.claudeModel ? [`Claude model: ${String(args.claudeModel)}`] : []),
-        ...(args?.claudeEffort ? [`Claude effort: ${String(args.claudeEffort)}`] : []),
+        `AI provider: ${providerLabel}`,
+        ...(aiProvider === "codex" && args?.codexModel
+          ? [`Codex model: ${String(args.codexModel)}`]
+          : []),
+        ...(aiProvider === "codex" && args?.codexEffort
+          ? [`Codex effort: ${String(args.codexEffort)}`]
+          : []),
+        ...(aiProvider === "claude" && args?.claudeModel
+          ? [`Claude model: ${String(args.claudeModel)}`]
+          : []),
+        ...(aiProvider === "claude" && args?.claudeEffort
+          ? [`Claude effort: ${String(args.claudeEffort)}`]
+          : []),
       ],
       startedAt: String(Date.now()),
       finishedAt: null,
@@ -986,7 +999,9 @@ export const mockHandlers: Record<string, Handler> = {
     status: "In Progress",
     descriptionText:
       "As a user I want to filter order lines by order id and article id.\nAcceptance: filters combine (AND); empty values are ignored.",
-    notionUrls: ["https://www.notion.so/example/Order-lines-filters-abc123def4567890abc123def45678"],
+    notionUrls: [
+      "https://www.notion.so/example/Order-lines-filters-abc123def4567890abc123def45678",
+    ],
   }),
   get_notion_page: () => ({
     title: "Order lines filters — spec",
