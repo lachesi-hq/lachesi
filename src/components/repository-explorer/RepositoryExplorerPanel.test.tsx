@@ -34,4 +34,42 @@ describe("RepositoryExplorerPanel", () => {
       expect(screen.getByText(/formatCurrency/)).toBeInTheDocument();
     });
   });
+
+  it("collapses and expands folders from the tree", async () => {
+    const user = userEvent.setup();
+    render(<RepositoryExplorerPanel workspace="example-workspace" repo="frontend-app" />);
+
+    const fileTree = screen.getByLabelText("Repository files");
+    await waitFor(() => {
+      expect(within(fileTree).getByRole("button", { name: /App\.tsx/ })).toBeInTheDocument();
+    });
+
+    await user.click(within(fileTree).getByRole("button", { name: /^src$/ }));
+
+    expect(within(fileTree).queryByRole("button", { name: /App\.tsx/ })).not.toBeInTheDocument();
+
+    await user.click(within(fileTree).getByRole("button", { name: /^src$/ }));
+
+    expect(within(fileTree).getByRole("button", { name: /App\.tsx/ })).toBeInTheDocument();
+  });
+
+  it("toggles all visible folders between collapsed and expanded", async () => {
+    const user = userEvent.setup();
+    render(<RepositoryExplorerPanel workspace="example-workspace" repo="frontend-app" />);
+
+    const fileTree = screen.getByLabelText("Repository files");
+    await waitFor(() => {
+      expect(within(fileTree).getByRole("button", { name: /App\.tsx/ })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Collapse all" }));
+
+    expect(within(fileTree).queryByRole("button", { name: /App\.tsx/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand all" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand all" }));
+
+    expect(within(fileTree).getByRole("button", { name: /App\.tsx/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse all" })).toBeInTheDocument();
+  });
 });

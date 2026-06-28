@@ -116,7 +116,6 @@ interface RepositoryTreeRowsProps {
   level: number;
   activePath: string | null;
   collapsedDirectories: Set<string>;
-  forceExpanded?: boolean;
   onSelectFile: (file: RepositoryFileEntry) => void;
   onToggleDirectory: (path: string) => void;
 }
@@ -126,7 +125,6 @@ function RepositoryTreeRows({
   level,
   activePath,
   collapsedDirectories,
-  forceExpanded = false,
   onSelectFile,
   onToggleDirectory,
 }: RepositoryTreeRowsProps) {
@@ -134,7 +132,7 @@ function RepositoryTreeRows({
     <ul className={level === 0 ? "" : "mt-0.5"}>
       {nodes.map((node) => {
         if (node.type === "directory") {
-          const collapsed = !forceExpanded && collapsedDirectories.has(node.path);
+          const collapsed = collapsedDirectories.has(node.path);
           return (
             <li key={node.path}>
               <button
@@ -154,7 +152,6 @@ function RepositoryTreeRows({
                   level={level + 1}
                   activePath={activePath}
                   collapsedDirectories={collapsedDirectories}
-                  forceExpanded={forceExpanded}
                   onSelectFile={onSelectFile}
                   onToggleDirectory={onToggleDirectory}
                 />
@@ -265,6 +262,9 @@ export function RepositoryExplorerPanel({
   }, [files, normalizedFilterQuery]);
   const tree = useMemo(() => buildTree(filteredFiles), [filteredFiles]);
   const allDirectoryPaths = useMemo(() => directoryPaths(tree), [tree]);
+  const allVisibleDirectoriesCollapsed =
+    allDirectoryPaths.length > 0 &&
+    allDirectoryPaths.every((path) => collapsedDirectories.has(path));
   const breadcrumbs = selectedPath?.split("/").filter(Boolean) ?? [];
 
   useEffect(() => {
@@ -341,6 +341,12 @@ export function RepositoryExplorerPanel({
     });
   };
 
+  const handleToggleAllDirectories = () => {
+    setCollapsedDirectories(
+      allVisibleDirectoriesCollapsed ? new Set() : new Set(allDirectoryPaths),
+    );
+  };
+
   if (!workspace || !repo) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -365,7 +371,10 @@ export function RepositoryExplorerPanel({
             <input
               type="search"
               value={filterQuery}
-              onChange={(event) => setFilterQuery(event.target.value)}
+              onChange={(event) => {
+                setFilterQuery(event.target.value);
+                setCollapsedDirectories(new Set());
+              }}
               placeholder="Search files..."
               className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-3 font-sans text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
             />
@@ -384,7 +393,6 @@ export function RepositoryExplorerPanel({
               level={0}
               activePath={selectedPath}
               collapsedDirectories={collapsedDirectories}
-              forceExpanded={normalizedFilterQuery.length > 0}
               onSelectFile={handleSelectFile}
               onToggleDirectory={handleToggleDirectory}
             />
@@ -395,9 +403,9 @@ export function RepositoryExplorerPanel({
           <button
             type="button"
             className="text-muted-foreground hover:text-foreground"
-            onClick={() => setCollapsedDirectories(new Set(allDirectoryPaths))}
+            onClick={handleToggleAllDirectories}
           >
-            Collapse all
+            {allVisibleDirectoriesCollapsed ? "Expand all" : "Collapse all"}
           </button>
         </div>
       </aside>
