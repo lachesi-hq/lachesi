@@ -2078,7 +2078,7 @@ fn begin_inline_review_run(
 }
 
 fn set_inline_review_pid(store: &AiReviewRunStore, key: &str, run_id: u64, pid: u32) {
-    set_inline_review_process_pid(store, key, run_id, pid, "Process");
+    set_inline_review_process_pid(store, key, run_id, pid, "Command");
 }
 
 fn set_inline_review_process_pid(
@@ -3043,7 +3043,7 @@ fn build_codex_text_command(
         " --skip-git-repo-check".to_string()
     };
     let shell_cmd = format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; codex exec --sandbox read-only --ask-for-approval never --output-last-message {}{model_arg}{effort_arg}{repo_arg} - < {}",
+        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; codex exec --sandbox read-only --output-last-message {}{model_arg}{effort_arg}{repo_arg} - < {}",
         shell_quote(&output_path.to_string_lossy()),
         shell_quote(&tmp_path.to_string_lossy())
     );
@@ -5477,7 +5477,7 @@ mod tests {
 
         assert!(shell.contains("codex exec"));
         assert!(shell.contains("--sandbox read-only"));
-        assert!(shell.contains("--ask-for-approval never"));
+        assert!(!shell.contains("--ask-for-approval"));
         assert!(shell.contains("--output-last-message"));
         assert!(shell.contains("gpt-5-codex"));
         assert!(shell.contains("model_reasoning_effort=high"));
