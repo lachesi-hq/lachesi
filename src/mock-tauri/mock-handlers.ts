@@ -126,6 +126,15 @@ export function App() {
   "README.md": `# Frontend app
 
 Mock repository fixture for Lachesi browser development.
+
+## Usage
+
+- Run \`pnpm dev\`
+- Open the [local app](https://example.com)
+
+\`\`\`ts
+export const preview = true;
+\`\`\`
 `,
 };
 
