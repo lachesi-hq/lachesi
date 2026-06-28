@@ -262,6 +262,8 @@ function RepositoryCodeViewer({
             active && selectedBlame && isRealCommitSha(selectedBlame.sha)
               ? bitbucketCommitUrl(workspace, repo, selectedBlame.sha)
               : null;
+          const commitMessage =
+            selectedBlame?.message?.trim() || selectedBlame?.summary?.trim() || null;
           return (
             <div key={`${file.path}:${lineNumber}`} data-line={lineNumber}>
               <button
@@ -282,27 +284,27 @@ function RepositoryCodeViewer({
                   ) : blameError ? (
                     <span className="text-destructive">{blameError}</span>
                   ) : selectedBlame ? (
-                    <>
-                      <span className="font-medium text-foreground">
-                        {selectedBlame.author ?? "Unknown author"}
-                      </span>
-                      {blameTime && <span>{blameTime}</span>}
-                      {commitUrl ? (
-                        <a
-                          href={commitUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-mono text-foreground underline decoration-border underline-offset-2 hover:text-primary"
-                        >
-                          {selectedBlame.shortSha}
-                        </a>
-                      ) : (
-                        <span className="font-mono">{selectedBlame.shortSha}</span>
-                      )}
-                      {selectedBlame.summary && (
-                        <span className="min-w-0 truncate">{selectedBlame.summary}</span>
-                      )}
-                    </>
+                    <div className="repo-blame-details">
+                      <div className="repo-blame-meta">
+                        <span className="font-medium text-foreground">
+                          {selectedBlame.author ?? "Unknown author"}
+                        </span>
+                        {blameTime && <span>{blameTime}</span>}
+                        {commitUrl ? (
+                          <a
+                            href={commitUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-mono text-foreground underline decoration-border underline-offset-2 hover:text-primary"
+                          >
+                            {selectedBlame.shortSha}
+                          </a>
+                        ) : (
+                          <span className="font-mono">{selectedBlame.shortSha}</span>
+                        )}
+                      </div>
+                      {commitMessage && <pre className="repo-blame-message">{commitMessage}</pre>}
+                    </div>
                   ) : (
                     <span className="text-muted-foreground">
                       No blame information for this line.

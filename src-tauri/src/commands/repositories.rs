@@ -72,11 +72,13 @@ pub struct RepositoryBlameLine {
     pub author_email: Option<String>,
     pub author_time: Option<i64>,
     pub summary: Option<String>,
+    pub message: Option<String>,
 }
 
 const MAX_REPOSITORY_FILE_BYTES: u64 = 512 * 1024;
 const GIT_BLAME_NO_COMMIT_ERROR: &str = "fatal: no such ref: HEAD";
 const GIT_BLAME_NO_PATH: &str = "fatal: no such path";
+const GIT_SHOW_MESSAGE_MARKER: &str = "\u{1f}LACHESI_COMMIT_MESSAGE_END\u{1f}";
 
 fn git_command(repo_path: &Path) -> Command {
     let mut cmd = Command::new("/usr/bin/git");
@@ -411,6 +413,7 @@ fn parse_git_blame_line_porcelain(output: &str) -> Vec<RepositoryBlameLine> {
                 author_email: None,
                 author_time: None,
                 summary: None,
+                message: None,
             });
             continue;
         }
@@ -440,6 +443,55 @@ fn parse_git_blame_line_porcelain(output: &str) -> Vec<RepositoryBlameLine> {
 
     entries.sort_by_key(|entry| entry.line);
     entries
+}
+
+fn is_real_commit_sha(sha: &str) -> bool {
+    !sha.is_empty() && sha.chars().any(|ch| ch != '0')
+}
+
+fn unique_real_shas(entries: &[RepositoryBlameLine]) -> Vec<String> {
+    let mut shas = Vec::new();
+    for entry in entries {
+        if !is_real_commit_sha(&entry.sha) || shas.contains(&entry.sha) {
+            continue;
+        }
+        shas.push(entry.sha.clone());
+    }
+    shas
+}
+
+fn parse_commit_messages(output: &str, shas: &[String]) -> Vec<String> {
+    let mut messages = output
+        .trim_end()
+        .split_terminator(GIT_SHOW_MESSAGE_MARKER)
+        .map(|message| message.trim().to_string())
+        .collect::<Vec<_>>();
+    messages.truncate(shas.len());
+    messages
+}
+
+fn attach_commit_messages(
+    repo_path: &Path,
+    entries: &mut [RepositoryBlameLine],
+) -> Result<(), String> {
+    let shas = unique_real_shas(entries);
+    if shas.is_empty() {
+        return Ok(());
+    }
+
+    let format_arg = format!("--format=%B{}", GIT_SHOW_MESSAGE_MARKER);
+    let mut args = vec!["show", "-s", format_arg.as_str()];
+    args.extend(shas.iter().map(String::as_str));
+    let output = run_git_checked_raw(repo_path, &args)?;
+    let messages = parse_commit_messages(&output, &shas);
+
+    for (sha, message) in shas.iter().zip(messages) {
+        for entry in entries.iter_mut().filter(|entry| entry.sha == *sha) {
+            entry.message = Some(message.clone());
+        }
+    }
+
+    Ok(())
 }
 
 fn fetch_repo(repo_path: &Path) -> Result<(), String> {
@@ -524,7 +576,9 @@ pub fn get_repository_file_blame(
     let _file_path = safe_repo_file_path(&repo_path, &path)?;
     let (code, stdout, stderr) = run_git(&repo_path, &["blame", "--line-porcelain", "--", &path])?;
     if code == Some(0) {
-        return Ok(parse_git_blame_line_porcelain(&stdout));
+        let mut entries = parse_git_blame_line_porcelain(&stdout);
+        attach_commit_messages(&repo_path, &mut entries)?;
+        return Ok(entries);
     }
 
     let trimmed = stderr.trim();
@@ -575,7 +629,8 @@ pub fn pull_repository(workspace: String, repo: String) -> Result<RepositoryWork
 #[cfg(test)]
 mod tests {
     use super::{
-        local_branch_for_remote, parse_git_blame_line_porcelain, validate_repo_relative_path,
+        GIT_SHOW_MESSAGE_MARKER, local_branch_for_remote, parse_commit_messages,
+        parse_git_blame_line_porcelain, validate_repo_relative_path,
     };
 
     #[test]
@@ -623,8 +678,28 @@ filename src/lib/format.ts
         assert_eq!(entries[0].author_email.as_deref(), Some("ada@example.com"));
         assert_eq!(entries[0].author_time, Some(1710000000));
         assert_eq!(entries[0].summary.as_deref(), Some("Add formatter"));
+        assert_eq!(entries[0].message, None);
         assert_eq!(entries[1].line, 2);
         assert_eq!(entries[1].short_sha, "00000000");
         assert_eq!(entries[1].author.as_deref(), Some("Not Committed Yet"));
+    }
+
+    #[test]
+    fn parses_batched_commit_messages() {
+        let shas = vec!["6f52c9a1".to_string(), "9a5e2d3c".to_string()];
+        let output = format!(
+            "Add formatter\n\nUse shared formatting.{}\nFix locale copy\n\nKeep labels concise.{}\n",
+            GIT_SHOW_MESSAGE_MARKER, GIT_SHOW_MESSAGE_MARKER
+        );
+
+        let messages = parse_commit_messages(&output, &shas);
+
+        assert_eq!(
+            messages,
+            vec![
+                "Add formatter\n\nUse shared formatting.".to_string(),
+                "Fix locale copy\n\nKeep labels concise.".to_string(),
+            ]
+        );
     }
 }

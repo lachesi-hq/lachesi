@@ -50,6 +50,7 @@ export interface RepositoryBlameLine {
   authorEmail: string | null;
   authorTime: number | null;
   summary: string | null;
+  message: string | null;
 }
 
 export type AppSelection =
