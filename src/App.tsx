@@ -546,7 +546,7 @@ export default function App() {
     const displayMessage = [`Question about \`${label}\``, "", question.trim()].join("\n");
     const payload = [
       "You are answering a focused reviewer question about one changed line in a pull request.",
-      "Answer directly and concisely. If the user asks for yes/no, answer yes or no first.",
+      "Answer directly and concisely.",
       "",
       "## Pull request",
       `${aiReviewContext.pr.title} (#${aiReviewContext.pr.id})`,
