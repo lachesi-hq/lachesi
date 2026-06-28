@@ -1,4 +1,10 @@
-import { ChatCircleText, CheckCircle, CircleNotch, GitPullRequest } from "@phosphor-icons/react";
+import {
+  ChatCircleText,
+  CheckCircle,
+  CircleNotch,
+  GitPullRequest,
+  Sparkle,
+} from "@phosphor-icons/react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import type { ChangeEventArgs } from "react-diff-view";
 import { CommentComposer } from "@/components/comments/CommentComposer";
@@ -10,6 +16,14 @@ import { DiffViewToggle } from "@/components/diff/DiffViewToggle";
 import { Markdown } from "@/components/Markdown";
 import { ReviewActions } from "@/components/review/ReviewActions";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useBranchStatus } from "@/hooks/useBranchStatus";
 import { useBranchSync } from "@/hooks/useBranchSync";
 import { useComments } from "@/hooks/useComments";
@@ -40,6 +54,7 @@ import { extractIssueKeys } from "@/lib/jira";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
 import { tauriCall } from "@/lib/tauri";
 import type {
+  AiLineQuestionContext,
   AiReviewContext,
   DiffViewMode,
   DraftComment,
@@ -77,6 +92,8 @@ export interface PrDetailPanelProps {
   ) => Promise<void>;
   /** Latest PR context used to rebuild review/fix payloads in sibling panels. */
   onAiReviewContextChange?: (context: AiReviewContext | null) => void;
+  /** Ask the selected AI provider a focused question about a changed line. */
+  onAskAiLine?: (context: AiLineQuestionContext, question: string) => void;
   drafts: DraftComment[];
   publishing: boolean;
   publishingDraftId: string | null;
@@ -94,6 +111,11 @@ interface ComposerTarget {
   path: string;
   to: number | null;
   from: number | null;
+}
+
+interface LineAskTarget {
+  context: AiLineQuestionContext;
+  label: string;
 }
 
 interface ConversationThreadItem {
@@ -120,6 +142,67 @@ function loadViewedFiles(key: string | null): Set<string> {
   } catch {
     return new Set();
   }
+}
+
+function diffPrefixForChange(change: ChangeData): string {
+  if (change.type === "insert") return "+";
+  if (change.type === "delete") return "-";
+  return " ";
+}
+
+function buildTargetedHunkDiff(file: FileData, change: ChangeData): string {
+  const changeKey = getChangeKey(change);
+  const hunk = file.hunks.find((candidate) =>
+    candidate.changes.some((item) => getChangeKey(item) === changeKey),
+  );
+  const oldPath = file.oldPath || "/dev/null";
+  const newPath = file.newPath || "/dev/null";
+  const lines = [
+    `diff --git a/${file.oldPath || newPath} b/${file.newPath || oldPath}`,
+    oldPath === "/dev/null" ? "--- /dev/null" : `--- a/${oldPath}`,
+    newPath === "/dev/null" ? "+++ /dev/null" : `+++ b/${newPath}`,
+  ];
+  if (hunk) {
+    lines.push(hunk.content);
+    for (const hunkChange of hunk.changes) {
+      lines.push(`${diffPrefixForChange(hunkChange)}${hunkChange.content}`);
+    }
+  } else {
+    lines.push(`${diffPrefixForChange(change)}${change.content}`);
+  }
+  return lines.join("\n");
+}
+
+function aiLineQuestionLabel(context: Pick<AiLineQuestionContext, "path" | "to" | "from">): string {
+  const line = context.to ?? context.from;
+  return line == null ? context.path : `${context.path}:${line}`;
+}
+
+function anchorForDiffLine(
+  file: FileData,
+  args: ChangeEventArgs,
+): {
+  change: ChangeData;
+  path: string;
+  to: number | null;
+  from: number | null;
+  side: "old" | "new";
+} | null {
+  const change = args.change as ChangeData | null;
+  if (!change) return null;
+  const side = args.side === "old" ? "old" : "new";
+  let path: string;
+  let to: number | null = null;
+  let from: number | null = null;
+  if (side === "old") {
+    path = file.oldPath || file.newPath;
+    from = changeOldLine(change) ?? null;
+  } else {
+    path = file.newPath || file.oldPath;
+    to = changeNewLine(change) ?? null;
+  }
+  if (to == null && from == null) return null;
+  return { change, path, to, from, side };
 }
 
 function saveViewedFiles(key: string | null, viewed: Set<string>) {
@@ -572,6 +655,7 @@ export function PrDetailPanel({
   onOpenAiReview,
   onResolveBranchConflicts,
   onAiReviewContextChange,
+  onAskAiLine,
   drafts,
   publishing,
   publishingDraftId,
@@ -607,6 +691,8 @@ export function PrDetailPanel({
   const jiraContext = useReviewContext(jiraKeys, jiraContextEnabled);
   const [viewMode, setViewMode] = useState<DiffViewMode>(defaultViewMode);
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
+  const [lineAskTarget, setLineAskTarget] = useState<LineAskTarget | null>(null);
+  const [lineAskQuestion, setLineAskQuestion] = useState("");
   const [publishError, setPublishError] = useState<string | null>(null);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [, setFileIndex] = useState(0);
@@ -629,6 +715,8 @@ export function PrDetailPanel({
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the selected PR/repo changes
   useEffect(() => {
     setComposer(null);
+    setLineAskTarget(null);
+    setLineAskQuestion("");
     setPublishError(null);
     setFileIndex(0);
     setViewedFileKeys(loadViewedFiles(viewedStorageKey));
@@ -702,21 +790,30 @@ export function PrDetailPanel({
   const grouped = useMemo(() => groupComments(files, comments), [files, comments]);
 
   const handleGutterClick = useCallback((file: FileData, args: ChangeEventArgs) => {
-    const change = args.change as ChangeData | null;
-    if (!change) return;
-    const side = args.side === "old" ? "old" : "new";
-    let path: string;
-    let to: number | null = null;
-    let from: number | null = null;
-    if (side === "old") {
-      path = file.oldPath || file.newPath;
-      from = changeOldLine(change) ?? null;
-    } else {
-      path = file.newPath || file.oldPath;
-      to = changeNewLine(change) ?? null;
-    }
-    if (to == null && from == null) return;
-    setComposer({ fileKeyStr: fileKey(file), changeKey: getChangeKey(change), path, to, from });
+    const anchor = anchorForDiffLine(file, args);
+    if (!anchor) return;
+    setComposer({
+      fileKeyStr: fileKey(file),
+      changeKey: getChangeKey(anchor.change),
+      path: anchor.path,
+      to: anchor.to,
+      from: anchor.from,
+    });
+  }, []);
+
+  const handleAskLine = useCallback((file: FileData, args: ChangeEventArgs) => {
+    const anchor = anchorForDiffLine(file, args);
+    if (!anchor) return;
+    const context: AiLineQuestionContext = {
+      path: anchor.path,
+      side: anchor.side,
+      to: anchor.to,
+      from: anchor.from,
+      lineText: anchor.change.content,
+      hunkDiff: buildTargetedHunkDiff(file, anchor.change),
+    };
+    setLineAskTarget({ context, label: aiLineQuestionLabel(context) });
+    setLineAskQuestion("");
   }, []);
 
   const handleToggleFileViewed = useCallback(
@@ -971,6 +1068,14 @@ export function PrDetailPanel({
     }
   }, [pr, refreshBranchStatus, syncBranch]);
 
+  const handleSubmitLineAsk = useCallback(() => {
+    const question = lineAskQuestion.trim();
+    if (!lineAskTarget || !question) return;
+    onAskAiLine?.(lineAskTarget.context, question);
+    setLineAskTarget(null);
+    setLineAskQuestion("");
+  }, [lineAskQuestion, lineAskTarget, onAskAiLine]);
+
   const normalizedCurrentUserName = currentUserDisplayName?.trim().toLowerCase() ?? null;
   const currentUserApproved =
     pr?.reviewers.some((reviewer) => {
@@ -1135,9 +1240,66 @@ export function PrDetailPanel({
             viewedFileKeys={viewedFileKeys}
             onToggleFileViewed={handleToggleFileViewed}
             onGutterClick={handleGutterClick}
+            onAskLine={onAskAiLine ? handleAskLine : undefined}
           />
         )}
       </div>
+      <Dialog
+        open={lineAskTarget != null}
+        onOpenChange={(open) => {
+          if (open) return;
+          setLineAskTarget(null);
+          setLineAskQuestion("");
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ask AI about this line</DialogTitle>
+            <DialogDescription>
+              {lineAskTarget
+                ? `The question will include context for ${lineAskTarget.label}.`
+                : "The question will include the selected diff line."}
+            </DialogDescription>
+          </DialogHeader>
+          {lineAskTarget && (
+            <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+              <div className="font-mono text-xs text-muted-foreground">{lineAskTarget.label}</div>
+              <pre className="mt-1 whitespace-pre-wrap font-mono text-xs text-foreground">
+                {lineAskTarget.context.lineText}
+              </pre>
+            </div>
+          )}
+          <textarea
+            autoFocus
+            value={lineAskQuestion}
+            onChange={(event) => setLineAskQuestion(event.target.value)}
+            rows={4}
+            placeholder="Ask what this line does, whether it is safe, or how it relates to the PR..."
+            className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+                handleSubmitLineAsk();
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setLineAskTarget(null);
+                setLineAskQuestion("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSubmitLineAsk} disabled={!lineAskQuestion.trim()}>
+              <Sparkle size={14} />
+              Ask AI
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {publishError && (
         <div className="shrink-0 border-t border-border bg-destructive/10 px-4 py-2 text-xs text-destructive">
           {publishError}

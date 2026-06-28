@@ -1,9 +1,17 @@
-import { CaretDown, CaretRight } from "@phosphor-icons/react";
+import { CaretDown, CaretRight, ChatCircleText, Sparkle } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { type ChangeEventArgs, Diff, Hunk } from "react-diff-view";
 import { Badge } from "@/components/ui/badge";
-import { countChanges, type FileData, fileAnchorId, fileDisplayPath } from "@/lib/diff";
+import {
+  type ChangeData,
+  changeNewLine,
+  changeOldLine,
+  countChanges,
+  type FileData,
+  fileAnchorId,
+  fileDisplayPath,
+} from "@/lib/diff";
 import { tokenizeFile } from "@/lib/highlight";
 import type { DiffViewMode } from "@/types";
 
@@ -28,8 +36,20 @@ export interface FileDiffProps {
   fileComments?: ReactNode;
   /** Called when a line gutter is clicked, to open a comment composer. */
   onGutterClick?: (file: FileData, args: ChangeEventArgs) => void;
+  /** Called when the AI gutter action is clicked for a specific diff line. */
+  onAskLine?: (file: FileData, args: ChangeEventArgs) => void;
   onToggleViewed?: (file: FileData) => void;
   onToggleCollapsed?: (file: FileData) => void;
+}
+
+interface GutterRenderOptions {
+  change: ChangeData;
+  side: "old" | "new";
+  renderDefault: () => ReactNode;
+}
+
+function hasLineForSide(change: ChangeData, side: "old" | "new"): boolean {
+  return side === "old" ? changeOldLine(change) != null : changeNewLine(change) != null;
 }
 
 export function FileDiff({
@@ -40,14 +60,68 @@ export function FileDiff({
   widgets,
   fileComments,
   onGutterClick,
+  onAskLine,
   onToggleViewed,
   onToggleCollapsed,
 }: FileDiffProps) {
   const { additions, deletions } = countChanges(file);
   const tokens = useMemo(() => (collapsed ? undefined : tokenizeFile(file)), [file, collapsed]);
-  const gutterEvents = onGutterClick
-    ? { onClick: (args: ChangeEventArgs) => onGutterClick(file, args) }
-    : undefined;
+  const renderGutter =
+    onGutterClick || onAskLine
+      ? ({ change, side, renderDefault }: GutterRenderOptions) => {
+          const canTargetLine = hasLineForSide(change, side);
+          const args = { change, side };
+          return (
+            <div className="group/gutter flex min-w-[4.5rem] items-center justify-end gap-0.5">
+              <button
+                type="button"
+                className="min-w-6 rounded px-1 text-right hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                disabled={!canTargetLine || !onGutterClick}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (canTargetLine) onGutterClick?.(file, args);
+                }}
+                title="Add PR comment"
+                aria-label="Add PR comment"
+              >
+                {renderDefault()}
+              </button>
+              {canTargetLine && (
+                <span className="inline-flex opacity-0 transition-opacity group-hover/gutter:opacity-100 group-focus-within/gutter:opacity-100">
+                  {onGutterClick && (
+                    <button
+                      type="button"
+                      className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onGutterClick(file, args);
+                      }}
+                      title="Add PR comment"
+                      aria-label="Add PR comment"
+                    >
+                      <ChatCircleText size={12} />
+                    </button>
+                  )}
+                  {onAskLine && (
+                    <button
+                      type="button"
+                      className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onAskLine(file, args);
+                      }}
+                      title="Ask AI about this line"
+                      aria-label="Ask AI about this line"
+                    >
+                      <Sparkle size={12} />
+                    </button>
+                  )}
+                </span>
+              )}
+            </div>
+          );
+        }
+      : undefined;
   const handleToggleViewed = () => {
     onToggleViewed?.(file);
   };
@@ -94,7 +168,7 @@ export function FileDiff({
             hunks={file.hunks}
             tokens={tokens}
             widgets={widgets}
-            gutterEvents={gutterEvents}
+            renderGutter={renderGutter}
           >
             {(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}
           </Diff>

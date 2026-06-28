@@ -39,6 +39,7 @@ import {
 import { resolveReviewPrompt } from "@/lib/reviewPrompt";
 import { tauriCall } from "@/lib/tauri";
 import type {
+  AiLineQuestionContext,
   AiReviewContext,
   AiReviewDraftCommentSuggestion,
   AiReviewJob,
@@ -55,6 +56,11 @@ import type {
 import { repoKey } from "@/types";
 
 const EMPTY_REPOS: RepoRef[] = [];
+
+function lineQuestionLabel(context: AiLineQuestionContext): string {
+  const line = context.to ?? context.from;
+  return line == null ? context.path : `${context.path}:${line}`;
+}
 
 export default function App() {
   const { theme, toggle } = useTheme();
@@ -531,6 +537,50 @@ export default function App() {
     return (await buildActiveReviewRequest())?.payload ?? null;
   };
 
+  const buildLineQuestionRequest = async (
+    lineContext: AiLineQuestionContext,
+    question: string,
+  ): Promise<{ payload: string; displayMessage: string } | null> => {
+    if (!activeSel || !aiReviewContext) return null;
+    const { prompt, warnings } = await resolveReviewPrompt(
+      `${activeSel.workspace}/${activeSel.repo}`,
+      activeRepo?.localPath,
+    );
+    if (warnings.length > 0) {
+      console.warn("Lachesi repo config warnings:", warnings);
+    }
+    const basePayload = buildReviewPayload({
+      prompt,
+      pr: aiReviewContext.pr,
+      branchStatus: aiReviewContext.branchStatus,
+      rawDiff: lineContext.hunkDiff,
+      jiraKeys: aiReviewContext.jiraKeys,
+      jiraBaseUrl: aiReviewContext.jiraBaseUrl,
+      jiraContext: aiReviewContext.jiraContext,
+      reviewReferences: reviewReferences.references,
+    });
+    const label = lineQuestionLabel(lineContext);
+    const displayMessage = [`Question about \`${label}\``, "", question.trim()].join("\n");
+    const payload = [
+      basePayload.trim(),
+      "",
+      "## Focused line question",
+      `File: ${lineContext.path}`,
+      `Side: ${lineContext.side}`,
+      lineContext.to != null ? `New line: ${lineContext.to}` : null,
+      lineContext.from != null ? `Old line: ${lineContext.from}` : null,
+      `Selected line: ${lineContext.lineText}`,
+      "",
+      "Answer the reviewer question using the selected line and hunk context. If the answer depends on code outside the hunk, say what you would inspect next instead of guessing.",
+      "",
+      "## Reviewer question",
+      question.trim(),
+    ]
+      .filter((line): line is string => line != null)
+      .join("\n");
+    return { payload, displayMessage };
+  };
+
   const hasAssistantReview =
     aiReview.activeThread?.messages.some((message) => message.role === "assistant") ?? false;
   const reviewForFix = hasAssistantReview ? aiReview.activeThread : null;
@@ -663,6 +713,16 @@ export default function App() {
         userMessage.trim(),
       ].join("\n");
       handleRunInlineReview(payload, userMessage.trim());
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleAskAiLine = async (lineContext: AiLineQuestionContext, question: string) => {
+    try {
+      const request = await buildLineQuestionRequest(lineContext, question);
+      if (!request) return;
+      handleRunInlineReview(request.payload, request.displayMessage);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
     }
@@ -1009,6 +1069,7 @@ export default function App() {
               onOpenAiReview={() => setReviewPanelOpen(true)}
               onResolveBranchConflicts={handleResolveBranchConflicts}
               onAiReviewContextChange={setAiReviewContext}
+              onAskAiLine={handleAskAiLine}
               drafts={draftComments.drafts}
               publishing={draftComments.publishing}
               publishingDraftId={draftComments.publishingDraftId}
