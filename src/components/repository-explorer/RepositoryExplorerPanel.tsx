@@ -1,4 +1,5 @@
 import {
+  ArrowSquareOut,
   CaretDown,
   CaretRight,
   File,
@@ -336,6 +337,8 @@ export function RepositoryExplorerPanel({
   const [loadingContent, setLoadingContent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
+  const [externalOpenError, setExternalOpenError] = useState<string | null>(null);
+  const [openingExternalFile, setOpeningExternalFile] = useState(false);
   const [collapsedDirectories, setCollapsedDirectories] = useState<Set<string>>(() => new Set());
   const [blameByPath, setBlameByPath] = useState<Record<string, BlameCacheEntry>>({});
 
@@ -457,6 +460,7 @@ export function RepositoryExplorerPanel({
   const handleSelectFile = (file: RepositoryFileEntry) => {
     setSelectedPath(file.path);
     setSelectedLine(null);
+    setExternalOpenError(null);
     onSelectFile?.(file.path, null);
   };
 
@@ -485,6 +489,24 @@ export function RepositoryExplorerPanel({
     setCollapsedDirectories(
       allVisibleDirectoriesCollapsed ? new Set() : new Set(allDirectoryPaths),
     );
+  };
+
+  const handleOpenExternalFile = () => {
+    if (!workspace || !repo || !selectedPath) return;
+    setOpeningExternalFile(true);
+    setExternalOpenError(null);
+    tauriCall("open_repository_file_external", {
+      workspace,
+      repo,
+      path: selectedPath,
+      line: selectedLine,
+    })
+      .catch((err: unknown) => {
+        setExternalOpenError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        setOpeningExternalFile(false);
+      });
   };
 
   if (!workspace || !repo) {
@@ -577,12 +599,29 @@ export function RepositoryExplorerPanel({
               );
             })}
           </div>
-          <div className="shrink-0 text-[11px] text-muted-foreground">
-            {loadingContent
-              ? "Loading..."
-              : content
-                ? `${formatBytes(content.size)}${content.truncated ? " truncated" : ""}`
-                : ""}
+          <div className="flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground">
+            {externalOpenError && (
+              <span className="max-w-72 truncate text-destructive" title={externalOpenError}>
+                {externalOpenError}
+              </span>
+            )}
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+              onClick={handleOpenExternalFile}
+              disabled={!selectedPath || loadingContent || openingExternalFile}
+              aria-label="Open file in external editor"
+              title="Open in external editor"
+            >
+              <ArrowSquareOut size={15} />
+            </button>
+            <span>
+              {loadingContent
+                ? "Loading..."
+                : content
+                  ? `${formatBytes(content.size)}${content.truncated ? " truncated" : ""}`
+                  : ""}
+            </span>
           </div>
         </header>
         {contentError ? (
