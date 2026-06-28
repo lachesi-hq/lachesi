@@ -367,12 +367,18 @@ body {
   --repo-md-accent-strong: #b83a00;
   --repo-md-accent: #8a5a1d;
   --repo-md-accent-soft: color-mix(in srgb, var(--repo-md-accent) 12%, transparent);
+  --repo-md-code-bg: color-mix(in srgb, var(--repo-md-accent) 7%, var(--muted));
+  --repo-md-code-border: color-mix(in srgb, var(--repo-md-accent) 22%, var(--border));
+  --repo-md-code-text: color-mix(in srgb, var(--foreground) 88%, var(--repo-md-accent));
 }
 
 [data-theme="dark"] .repo-markdown-viewer {
   --repo-md-accent-strong: #f54e00;
   --repo-md-accent: #c08532;
   --repo-md-accent-soft: color-mix(in srgb, var(--repo-md-accent) 16%, transparent);
+  --repo-md-code-bg: color-mix(in srgb, var(--repo-md-accent) 9%, #171717);
+  --repo-md-code-border: color-mix(in srgb, var(--repo-md-accent) 26%, var(--border));
+  --repo-md-code-text: color-mix(in srgb, var(--foreground) 90%, var(--repo-md-accent));
 }
 
 .repo-markdown-viewer .lachesi-md {
@@ -409,11 +415,18 @@ body {
 }
 
 .repo-markdown-viewer .lachesi-md code {
-  background: var(--repo-md-accent-soft);
-  color: var(--repo-md-accent);
+  border: 1px solid var(--repo-md-code-border);
+  background: var(--repo-md-code-bg);
+  color: var(--repo-md-code-text);
+}
+
+.repo-markdown-viewer .lachesi-md pre {
+  border: 1px solid var(--repo-md-code-border);
+  background: color-mix(in srgb, var(--repo-md-code-bg) 78%, var(--background));
 }
 
 .repo-markdown-viewer .lachesi-md pre code {
+  border: 0;
   color: var(--foreground);
 }
 
