@@ -542,36 +542,27 @@ export default function App() {
     question: string,
   ): Promise<{ payload: string; displayMessage: string } | null> => {
     if (!activeSel || !aiReviewContext) return null;
-    const { prompt, warnings } = await resolveReviewPrompt(
-      `${activeSel.workspace}/${activeSel.repo}`,
-      activeRepo?.localPath,
-    );
-    if (warnings.length > 0) {
-      console.warn("Lachesi repo config warnings:", warnings);
-    }
-    const basePayload = buildReviewPayload({
-      prompt,
-      pr: aiReviewContext.pr,
-      branchStatus: aiReviewContext.branchStatus,
-      rawDiff: lineContext.hunkDiff,
-      jiraKeys: aiReviewContext.jiraKeys,
-      jiraBaseUrl: aiReviewContext.jiraBaseUrl,
-      jiraContext: aiReviewContext.jiraContext,
-      reviewReferences: reviewReferences.references,
-    });
     const label = lineQuestionLabel(lineContext);
     const displayMessage = [`Question about \`${label}\``, "", question.trim()].join("\n");
     const payload = [
-      basePayload.trim(),
+      "You are answering a focused reviewer question about one changed line in a pull request.",
+      "Answer directly and concisely. If the user asks for yes/no, answer yes or no first.",
       "",
-      "## Focused line question",
+      "## Pull request",
+      `${aiReviewContext.pr.title} (#${aiReviewContext.pr.id})`,
+      `Branch: ${aiReviewContext.pr.sourceBranch} -> ${aiReviewContext.pr.destinationBranch}`,
+      "",
+      "## Selected line",
       `File: ${lineContext.path}`,
       `Side: ${lineContext.side}`,
       lineContext.to != null ? `New line: ${lineContext.to}` : null,
       lineContext.from != null ? `Old line: ${lineContext.from}` : null,
       `Selected line: ${lineContext.lineText}`,
       "",
-      "Answer the reviewer question using the selected line and hunk context. If the answer depends on code outside the hunk, say what you would inspect next instead of guessing.",
+      "## Diff hunk",
+      "```diff",
+      lineContext.hunkDiff.trim(),
+      "```",
       "",
       "## Reviewer question",
       question.trim(),
@@ -597,7 +588,11 @@ export default function App() {
         })
       : null;
 
-  const handleRunInlineReview = (payload: string, displayMessage?: string | null) => {
+  const handleRunInlineReview = (
+    payload: string,
+    displayMessage?: string | null,
+    options: { reviewKind?: "lineQuestion"; threadTitle?: string; skipAnalyzers?: boolean } = {},
+  ) => {
     if (!activeSel || !aiReviewContext) return;
     const selectionForReview = activeSel;
     const contextForReview = aiReviewContext;
@@ -630,6 +625,9 @@ export default function App() {
         await aiReview.run({
           payload,
           displayMessage,
+          reviewKind: options.reviewKind ?? null,
+          threadTitle: options.threadTitle ?? null,
+          skipAnalyzers: options.skipAnalyzers ?? false,
           title: contextForReview.pr.title || `PR #${selectionForReview.prId}`,
           sourceBranch: contextForReview.pr.sourceBranch,
           destinationBranch: contextForReview.pr.destinationBranch,
@@ -722,7 +720,11 @@ export default function App() {
     try {
       const request = await buildLineQuestionRequest(lineContext, question);
       if (!request) return;
-      handleRunInlineReview(request.payload, request.displayMessage);
+      handleRunInlineReview(request.payload, request.displayMessage, {
+        reviewKind: "lineQuestion",
+        threadTitle: "Line question",
+        skipAnalyzers: true,
+      });
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
     }

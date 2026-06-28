@@ -17,6 +17,9 @@ interface StartReviewArgs {
   title: string;
   sourceBranch: string;
   destinationBranch: string;
+  reviewKind?: "lineQuestion" | null;
+  threadTitle?: string | null;
+  skipAnalyzers?: boolean;
   aiProvider: AiProvider;
   claudeModel: ClaudeReviewModel | null;
   claudeEffort: ClaudeReviewEffort | null;
@@ -166,6 +169,9 @@ export function useAiReview(
       title,
       sourceBranch,
       destinationBranch,
+      reviewKind,
+      threadTitle,
+      skipAnalyzers,
       aiProvider,
       claudeModel,
       claudeEffort,
@@ -187,6 +193,9 @@ export function useAiReview(
           displayMessage,
           sourceBranch,
           destinationBranch,
+          reviewKind,
+          threadTitle,
+          skipAnalyzers: Boolean(skipAnalyzers),
           aiProvider,
           claudeModel,
           claudeEffort,
