@@ -680,9 +680,20 @@ function RepositoryMarkdownPreview({ file }: { file: RepositoryFileContent | nul
   );
 
   const handleSelectHeading = (id: string) => {
-    const target = scrollRef.current?.querySelector(`#${id}`);
-    if (target instanceof HTMLElement && typeof target.scrollIntoView === "function") {
-      target.scrollIntoView({ block: "start" });
+    const container = scrollRef.current;
+    const target = container?.querySelector(`#${id}`);
+    if (!(container instanceof HTMLElement) || !(target instanceof HTMLElement)) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    container.scrollTo({
+      top: container.scrollTop + targetRect.top - containerRect.top - 16,
+      behavior: "smooth",
+    });
+
+    if (typeof target.focus === "function") {
+      target.setAttribute("tabindex", "-1");
+      target.focus({ preventScroll: true });
     }
   };
 
