@@ -1,6 +1,6 @@
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { type ChangeEventArgs, Diff, Hunk } from "react-diff-view";
 import { Badge } from "@/components/ui/badge";
 import { countChanges, type FileData, fileAnchorId, fileDisplayPath } from "@/lib/diff";
@@ -21,6 +21,7 @@ export interface FileDiffProps {
   file: FileData;
   viewType: RenderableDiffViewMode;
   viewed?: boolean;
+  collapsed?: boolean;
   /** changeKey → node, rendered as a full-width row under the matching line. */
   widgets?: Record<string, ReactNode>;
   /** File-level comments rendered at the top of the file (not tied to a line). */
@@ -28,27 +29,27 @@ export interface FileDiffProps {
   /** Called when a line gutter is clicked, to open a comment composer. */
   onGutterClick?: (file: FileData, args: ChangeEventArgs) => void;
   onToggleViewed?: (file: FileData) => void;
+  onToggleCollapsed?: (file: FileData) => void;
 }
 
 export function FileDiff({
   file,
   viewType,
   viewed = false,
+  collapsed = false,
   widgets,
   fileComments,
   onGutterClick,
   onToggleViewed,
+  onToggleCollapsed,
 }: FileDiffProps) {
   const { additions, deletions } = countChanges(file);
-  // Large files start collapsed (lazy): the diff + highlighting only mount on expand.
-  const [collapsed, setCollapsed] = useState(additions + deletions > 500);
   const tokens = useMemo(() => (collapsed ? undefined : tokenizeFile(file)), [file, collapsed]);
   const gutterEvents = onGutterClick
     ? { onClick: (args: ChangeEventArgs) => onGutterClick(file, args) }
     : undefined;
   const handleToggleViewed = () => {
     onToggleViewed?.(file);
-    setCollapsed(!viewed);
   };
 
   return (
@@ -56,7 +57,7 @@ export function FileDiff({
       <header className="sticky top-9 z-10 flex items-center gap-2 border-b border-border bg-secondary px-3 py-1.5 text-xs">
         <button
           type="button"
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={() => onToggleCollapsed?.(file)}
           className="flex min-w-0 items-center gap-1.5 hover:text-foreground"
           aria-expanded={!collapsed}
         >
