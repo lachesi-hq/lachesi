@@ -364,6 +364,15 @@ body {
 .repo-markdown-viewer {
   background: var(--background);
   padding: 1.5rem 2rem 2.5rem;
+  --repo-md-accent-strong: #b83a00;
+  --repo-md-accent: #8a5a1d;
+  --repo-md-accent-soft: color-mix(in srgb, var(--repo-md-accent) 12%, transparent);
+}
+
+[data-theme="dark"] .repo-markdown-viewer {
+  --repo-md-accent-strong: #f54e00;
+  --repo-md-accent: #c08532;
+  --repo-md-accent-soft: color-mix(in srgb, var(--repo-md-accent) 16%, transparent);
 }
 
 .repo-markdown-viewer .lachesi-md {
@@ -381,27 +390,27 @@ body {
 
 .repo-markdown-viewer .lachesi-md h1 {
   font-size: 1.8em;
-  color: var(--accent-foreground);
+  color: var(--repo-md-accent-strong);
 }
 
 .repo-markdown-viewer .lachesi-md h2 {
   font-size: 1.35em;
-  color: var(--success);
-  border-bottom-color: color-mix(in srgb, var(--success) 32%, var(--border));
+  color: var(--repo-md-accent);
+  border-bottom-color: color-mix(in srgb, var(--repo-md-accent) 38%, var(--border));
 }
 
 .repo-markdown-viewer .lachesi-md h3,
 .repo-markdown-viewer .lachesi-md h4 {
-  color: var(--warning);
+  color: color-mix(in srgb, var(--repo-md-accent) 82%, var(--foreground));
 }
 
 .repo-markdown-viewer .lachesi-md a {
-  color: var(--ring);
+  color: var(--repo-md-accent-strong);
 }
 
 .repo-markdown-viewer .lachesi-md code {
-  background: color-mix(in srgb, var(--warning) 14%, var(--muted));
-  color: var(--warning);
+  background: var(--repo-md-accent-soft);
+  color: var(--repo-md-accent);
 }
 
 .repo-markdown-viewer .lachesi-md pre code {
@@ -409,14 +418,14 @@ body {
 }
 
 .repo-markdown-viewer .lachesi-md blockquote {
-  border-left-color: var(--accent-foreground);
-  background: color-mix(in srgb, var(--accent-foreground) 7%, transparent);
+  border-left-color: var(--repo-md-accent);
+  background: var(--repo-md-accent-soft);
   color: color-mix(in srgb, var(--foreground) 76%, var(--muted-foreground));
 }
 
 .repo-markdown-viewer .lachesi-md th {
-  background: color-mix(in srgb, var(--accent-foreground) 8%, var(--muted));
-  color: var(--accent-foreground);
+  background: var(--repo-md-accent-soft);
+  color: var(--repo-md-accent);
 }
 
 .repo-diff-line {
