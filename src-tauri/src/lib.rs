@@ -105,6 +105,7 @@ pub fn run() {
             context::get_notion_page,
             repositories::list_repository_worktrees,
             repositories::list_repository_files,
+            repositories::get_repository_file_diff,
             repositories::read_repository_file,
             repositories::get_repository_file_blame,
             repositories::open_repository_file_external,

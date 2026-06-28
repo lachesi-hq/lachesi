@@ -304,6 +304,44 @@ body {
   white-space: pre;
 }
 
+.repo-diff-line {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  min-height: 1.55em;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.repo-diff-line--add {
+  background: var(--diff-add-bg);
+}
+
+.repo-diff-line--delete {
+  background: var(--diff-del-bg);
+}
+
+.repo-diff-line--hunk,
+.repo-diff-line--meta {
+  background: var(--diff-hunk-bg);
+  color: var(--muted-foreground);
+}
+
+.repo-diff-prefix {
+  user-select: none;
+  border-right: 1px solid var(--border);
+  padding-right: 0.75rem;
+  text-align: right;
+  color: var(--muted-foreground);
+}
+
+.repo-diff-content {
+  display: block;
+  min-width: 0;
+  padding-left: 0.75rem;
+  white-space: pre;
+}
+
 .repo-blame-popover {
   display: flex;
   min-width: 0;

@@ -12,6 +12,7 @@ import type {
   PullRequestPage,
   RepositoryBlameLine,
   RepositoryFileContent,
+  RepositoryFileDiff,
   RepositoryFileEntry,
   ReviewFinding,
   ReviewFindingPublication,
@@ -125,6 +126,50 @@ export function App() {
   "README.md": `# Frontend app
 
 Mock repository fixture for Lachesi browser development.
+`,
+};
+
+const mockRepositoryFileDiffs: Record<string, string> = {
+  "src/App.tsx": `diff --git a/src/App.tsx b/src/App.tsx
+index 1111111..2222222 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,5 +1,5 @@
+ import { OrderTable } from "./components/orders/OrderTable";
+ 
+ export function App() {
+-  return <OrderTable />;
++  return <OrderTable showLocalDraft />;
+ }
+`,
+  "src/lib/format.ts": `diff --git a/src/lib/format.ts b/src/lib/format.ts
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/src/lib/format.ts
+@@ -0,0 +1,6 @@
++export function formatCurrency(value: number) {
++  return new Intl.NumberFormat("en-US", {
++    style: "currency",
++    currency: "USD",
++  }).format(value);
++}
+`,
+  "src/lib/localDraft.ts": `diff --git a/src/lib/localDraft.ts b/src/lib/localDraft.ts
+new file mode 100644
+index 0000000..4444444
+--- /dev/null
++++ b/src/lib/localDraft.ts
+@@ -0,0 +1 @@
++export const localDraft = true;
+`,
+  "src/lib/legacy.ts": `diff --git a/src/lib/legacy.ts b/src/lib/legacy.ts
+deleted file mode 100644
+index 5555555..0000000
+--- a/src/lib/legacy.ts
++++ /dev/null
+@@ -1 +0,0 @@
+-export const legacy = true;
 `,
 };
 
@@ -600,6 +645,13 @@ export const mockHandlers: Record<string, Handler> = {
       throw new Error(`Mock file not found: ${path}`);
     }
     return mockBlameForPath(path);
+  },
+  get_repository_file_diff: (args) => {
+    const path = String(args?.path ?? "");
+    return {
+      path,
+      rawDiff: mockRepositoryFileDiffs[path] ?? "",
+    } satisfies RepositoryFileDiff;
   },
   open_repository_file_external: (args) => {
     const path = String(args?.path ?? "");

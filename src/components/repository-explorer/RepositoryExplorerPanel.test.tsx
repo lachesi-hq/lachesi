@@ -23,6 +23,9 @@ describe("RepositoryExplorerPanel", () => {
     expect(screen.getByText("9 files")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "4 changed" })).toBeInTheDocument();
     expect(within(fileTree).getByTitle("Modified")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/showLocalDraft/)).toBeInTheDocument();
+    });
 
     await user.click(screen.getByRole("button", { name: "4 changed" }));
 
@@ -98,6 +101,7 @@ describe("RepositoryExplorerPanel", () => {
       />,
     );
 
+    await user.click(await screen.findByRole("button", { name: "File" }));
     const lineButton = await screen.findByRole("button", { name: "Select line 4" });
     await user.click(lineButton);
 
