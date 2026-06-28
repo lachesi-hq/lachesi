@@ -398,6 +398,7 @@ body {
 .repo-markdown-viewer .lachesi-md h2,
 .repo-markdown-viewer .lachesi-md h3,
 .repo-markdown-viewer .lachesi-md h4 {
+  scroll-margin-top: 1rem;
   letter-spacing: 0;
 }
 
