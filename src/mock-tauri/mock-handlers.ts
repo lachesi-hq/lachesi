@@ -10,6 +10,7 @@ import type {
   PrComment,
   PrListFilter,
   PullRequestPage,
+  RepositoryBlameLine,
   RepositoryFileContent,
   RepositoryFileEntry,
   ReviewFinding,
@@ -122,6 +123,20 @@ export function App() {
 Mock repository fixture for Lachesi browser development.
 `,
 };
+
+function mockBlameForPath(path: string): RepositoryBlameLine[] {
+  const content = mockRepositoryFileContents[path] ?? "";
+  const lineCount = content.split("\n").length;
+  return Array.from({ length: lineCount }, (_, index) => ({
+    line: index + 1,
+    sha: "6f52c9a1cf5cd075762f13d0b0f8bf8d0f4f3f7d",
+    shortSha: "6f52c9a1",
+    author: index % 2 === 0 ? "Ada Lovelace" : "Grace Hopper",
+    authorEmail: index % 2 === 0 ? "ada@example.com" : "grace@example.com",
+    authorTime: 1710000000 + index * 60,
+    summary: path.endsWith("format.ts") ? "Add currency formatting helper" : "Update fixture file",
+  }));
+}
 
 /** localStorage-backed store that simulates on-disk review persistence for browser dev mode. */
 const REVIEW_STORE_KEY = "lachesi.mock.reviews";
@@ -571,6 +586,13 @@ export const mockHandlers: Record<string, Handler> = {
       size: new TextEncoder().encode(content).length,
       truncated: false,
     } satisfies RepositoryFileContent;
+  },
+  get_repository_file_blame: (args) => {
+    const path = String(args?.path ?? "");
+    if (mockRepositoryFileContents[path] == null) {
+      throw new Error(`Mock file not found: ${path}`);
+    }
+    return mockBlameForPath(path);
   },
   checkout_repository_branch: (args) => ({
     workspace: String(args?.workspace ?? "example-workspace"),

@@ -42,6 +42,16 @@ export interface RepositoryFileContent {
   truncated: boolean;
 }
 
+export interface RepositoryBlameLine {
+  line: number;
+  sha: string;
+  shortSha: string;
+  author: string | null;
+  authorEmail: string | null;
+  authorTime: number | null;
+  summary: string | null;
+}
+
 export type AppSelection =
   | { kind: "pr-list" }
   | { kind: "overview" }
