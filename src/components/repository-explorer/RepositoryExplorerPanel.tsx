@@ -12,6 +12,7 @@ import {
 } from "@phosphor-icons/react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Markdown } from "@/components/Markdown";
 import { type HighlightNode, highlightCode } from "@/lib/highlight";
 import { tauriCall } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -52,6 +53,7 @@ type FileDiffState =
   | { status: "failed"; diff: null; error: string };
 
 type RepositoryViewerMode = "file" | "diff";
+type MarkdownViewerMode = "source" | "rendered";
 
 type FindMatch = {
   id: string;
@@ -219,6 +221,11 @@ function isEditableShortcutTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+}
+
+function isMarkdownPath(path: string | null | undefined): boolean {
+  if (!path) return false;
+  return /\.(md|markdown)$/i.test(path);
 }
 
 function formatBytes(size: number): string {
@@ -615,6 +622,22 @@ function RepositoryCodeViewer({
   );
 }
 
+function RepositoryMarkdownPreview({ file }: { file: RepositoryFileContent | null }) {
+  if (!file) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+        Select a file from the repository tree.
+      </div>
+    );
+  }
+
+  return (
+    <div className="repo-markdown-viewer min-h-0 flex-1 overflow-auto">
+      <Markdown>{file.content}</Markdown>
+    </div>
+  );
+}
+
 export function RepositoryExplorerPanel({
   workspace,
   repo,
@@ -627,6 +650,7 @@ export function RepositoryExplorerPanel({
   const [selectedLine, setSelectedLine] = useState<number | null>(initialLine ?? null);
   const [content, setContent] = useState<RepositoryFileContent | null>(null);
   const [viewerMode, setViewerMode] = useState<RepositoryViewerMode>("file");
+  const [markdownViewerMode, setMarkdownViewerMode] = useState<MarkdownViewerMode>("source");
   const [fileDiffState, setFileDiffState] = useState<FileDiffState>({
     status: "idle",
     diff: null,
@@ -670,6 +694,7 @@ export function RepositoryExplorerPanel({
     [files, selectedPath],
   );
   const selectedFileHasChanges = selectedFile ? isChangedFileStatus(selectedFile.status) : false;
+  const selectedFileIsMarkdown = isMarkdownPath(selectedPath);
   const searchableLines = useMemo(() => {
     if (viewerMode === "diff" && fileDiffState.status === "ready") {
       return fileDiffState.diff.rawDiff.split("\n");
@@ -789,6 +814,7 @@ export function RepositoryExplorerPanel({
   useEffect(() => {
     setSelectedPath(initialPath ?? null);
     setSelectedLine(initialLine ?? null);
+    setMarkdownViewerMode("source");
   }, [initialPath, initialLine]);
 
   useEffect(() => {
@@ -892,6 +918,7 @@ export function RepositoryExplorerPanel({
     setSelectedPath(file.path);
     setSelectedLine(null);
     setViewerMode(isChangedFileStatus(file.status) ? "diff" : "file");
+    setMarkdownViewerMode("source");
     setActiveFindIndex(0);
     setExternalOpenError(null);
     onSelectFile?.(file.path, null);
@@ -1133,6 +1160,30 @@ export function RepositoryExplorerPanel({
                 </button>
               </div>
             )}
+            {selectedFileIsMarkdown && viewerMode === "file" && (
+              <div className="inline-flex rounded-md border border-border bg-muted p-0.5">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded px-2 py-0.5 hover:text-foreground",
+                    markdownViewerMode === "source" && "bg-background text-foreground",
+                  )}
+                  onClick={() => setMarkdownViewerMode("source")}
+                >
+                  Source
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded px-2 py-0.5 hover:text-foreground",
+                    markdownViewerMode === "rendered" && "bg-background text-foreground",
+                  )}
+                  onClick={() => setMarkdownViewerMode("rendered")}
+                >
+                  Preview
+                </button>
+              </div>
+            )}
             {externalOpenError && (
               <span className="max-w-72 truncate text-destructive" title={externalOpenError}>
                 {externalOpenError}
@@ -1167,6 +1218,8 @@ export function RepositoryExplorerPanel({
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
             {contentError}
           </div>
+        ) : selectedFileIsMarkdown && markdownViewerMode === "rendered" ? (
+          <RepositoryMarkdownPreview file={content} />
         ) : (
           <RepositoryCodeViewer
             file={content}

@@ -159,4 +159,37 @@ describe("RepositoryExplorerPanel", () => {
     ).not.toBeInTheDocument();
     expect(container.querySelectorAll(".repo-find-match")).toHaveLength(0);
   });
+
+  it("renders Markdown files with a source and preview toggle", async () => {
+    const user = userEvent.setup();
+    render(<RepositoryExplorerPanel workspace="example-workspace" repo="frontend-app" />);
+
+    await screen.findByText(/showLocalDraft/);
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: /README\.md/ }));
+
+    expect(await screen.findByRole("button", { name: "Source" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeInTheDocument();
+    expect(
+      await screen.findByText("Mock repository fixture for Lachesi browser development."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(screen.getByRole("heading", { name: "Frontend app", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Usage", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "local app" })).toHaveAttribute(
+      "href",
+      "https://example.com",
+    );
+    expect(screen.getByText("pnpm dev")).toBeInTheDocument();
+    expect(screen.getByText("export const preview = true;")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Source" }));
+
+    expect(
+      screen.getByText("Mock repository fixture for Lachesi browser development."),
+    ).toBeInTheDocument();
+  });
 });

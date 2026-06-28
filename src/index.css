@@ -361,6 +361,25 @@ body {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 80%, transparent);
 }
 
+.repo-markdown-viewer {
+  background: var(--background);
+  padding: 1.5rem 2rem 2.5rem;
+}
+
+.repo-markdown-viewer .lachesi-md {
+  max-width: 48rem;
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.repo-markdown-viewer .lachesi-md h1 {
+  font-size: 1.8em;
+}
+
+.repo-markdown-viewer .lachesi-md h2 {
+  font-size: 1.35em;
+}
+
 .repo-diff-line {
   display: grid;
   grid-template-columns: 2.5rem minmax(0, 1fr);
