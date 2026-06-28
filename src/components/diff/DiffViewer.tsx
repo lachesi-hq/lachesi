@@ -1,15 +1,24 @@
 import "react-diff-view/style/index.css";
 import "./diff-theme.css";
 import { CaretDown } from "@phosphor-icons/react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import type { ChangeEventArgs } from "react-diff-view";
 import { countChanges, type FileData, fileAnchorId, fileKey } from "@/lib/diff";
 import type { DiffViewMode } from "@/types";
 import { DiffViewToggle } from "./DiffViewToggle";
 import { FileDiff } from "./FileDiff";
-import { FileTree } from "./FileTree";
+import { FileTree, type FileTreeFolderCommand } from "./FileTree";
 
 type RenderableDiffViewMode = Exclude<DiffViewMode, "conversation">;
+
+function startsCollapsed(file: FileData): boolean {
+  const { additions, deletions } = countChanges(file);
+  return additions + deletions > 500;
+}
+
+function initialCollapsedFileKeys(files: FileData[]): Set<string> {
+  return new Set(files.filter(startsCollapsed).map(fileKey));
+}
 
 export interface DiffViewerProps {
   files: FileData[];
@@ -39,13 +48,99 @@ export function DiffViewer({
   onToggleFileViewed,
   onGutterClick,
 }: DiffViewerProps) {
-  const [showFiles, setShowFiles] = useState(false);
+  const [showFiles, setShowFiles] = useState(true);
+  const [activeFileKey, setActiveFileKey] = useState<string | null>(() =>
+    files[0] ? fileKey(files[0]) : null,
+  );
+  const [collapsedFileKeys, setCollapsedFileKeys] = useState<Set<string>>(() =>
+    initialCollapsedFileKeys(files),
+  );
+  const [foldersCollapsed, setFoldersCollapsed] = useState(false);
+  const [folderCommand, setFolderCommand] = useState<FileTreeFolderCommand | undefined>();
+  const fileKeysByAnchorId = useMemo(
+    () => new Map(files.map((file) => [fileAnchorId(file), fileKey(file)])),
+    [files],
+  );
+
+  useEffect(() => {
+    setActiveFileKey(files[0] ? fileKey(files[0]) : null);
+  }, [files]);
+
+  useEffect(() => {
+    setCollapsedFileKeys((previous) => {
+      const currentFileKeys = new Set(files.map(fileKey));
+      const next = new Set([...previous].filter((key) => currentFileKeys.has(key)));
+      for (const file of files) {
+        const key = fileKey(file);
+        if (startsCollapsed(file) && !previous.has(key)) next.add(key);
+      }
+      return next;
+    });
+  }, [files]);
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const closestVisibleEntry = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort(
+            (a, b) => Math.abs(a.boundingClientRect.top) - Math.abs(b.boundingClientRect.top),
+          )[0];
+        if (!closestVisibleEntry) return;
+        const key = fileKeysByAnchorId.get(closestVisibleEntry.target.id);
+        if (key) setActiveFileKey(key);
+      },
+      { rootMargin: "-80px 0px -70% 0px", threshold: 0 },
+    );
+
+    for (const anchorId of fileKeysByAnchorId.keys()) {
+      const element = document.getElementById(anchorId);
+      if (element) observer.observe(element);
+    }
+
+    return () => observer.disconnect();
+  }, [fileKeysByAnchorId]);
 
   const scrollToFile = (file: FileData) => {
+    setActiveFileKey(fileKey(file));
     document
       .getElementById(fileAnchorId(file))
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setShowFiles(false);
+  };
+
+  const handleToggleFileCollapsed = (file: FileData) => {
+    const key = fileKey(file);
+    setCollapsedFileKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleToggleFileViewed = (file: FileData) => {
+    const key = fileKey(file);
+    const currentlyViewed = viewedFileKeys?.has(key) ?? false;
+    onToggleFileViewed?.(file);
+    setCollapsedFileKeys((previous) => {
+      const next = new Set(previous);
+      if (currentlyViewed) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleToggleAllFolders = () => {
+    setFoldersCollapsed((currentlyCollapsed) => {
+      const nextCollapsed = !currentlyCollapsed;
+      setFolderCommand((previous) => ({
+        id: (previous?.id ?? 0) + 1,
+        mode: nextCollapsed ? "collapse" : "expand",
+      }));
+      return nextCollapsed;
+    });
   };
 
   if (loading) {
@@ -100,28 +195,60 @@ export function DiffViewer({
             <DiffViewToggle value={viewMode} onChange={onViewModeChange} />
           </div>
         </div>
-        {showFiles && (
-          <FileTree
-            files={files}
-            viewedFileKeys={viewedFileKeys}
-            onSelect={scrollToFile}
-            onToggleViewed={onToggleFileViewed}
-          />
-        )}
       </div>
-      <div>
-        {files.map((file) => (
-          <FileDiff
-            key={fileKey(file)}
-            file={file}
-            viewType={viewMode}
-            viewed={viewedFileKeys?.has(fileKey(file)) ?? false}
-            widgets={widgetsByFile?.[fileKey(file)]}
-            fileComments={fileWidgets?.[fileKey(file)]}
-            onGutterClick={onGutterClick}
-            onToggleViewed={onToggleFileViewed}
-          />
-        ))}
+      <div className="flex min-w-0 items-start">
+        {showFiles && (
+          <aside className="sticky top-9 z-10 h-[calc(100vh-2.25rem)] w-80 shrink-0 border-r border-border bg-secondary">
+            <div className="flex h-8 items-center border-b border-border px-3 text-xs font-semibold">
+              <span className="min-w-0 flex-1 truncate">Changed files</span>
+              <button
+                type="button"
+                onClick={handleToggleAllFolders}
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:shrink-0"
+                title={foldersCollapsed ? "Expand all" : "Collapse all"}
+                aria-label={foldersCollapsed ? "Expand all folders" : "Collapse all folders"}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  fill="currentColor"
+                  viewBox="0 0 256 256"
+                  aria-hidden="true"
+                  className={foldersCollapsed ? "rotate-180" : ""}
+                >
+                  <path d="M213.66,194.34a8,8,0,0,1-11.32,11.32L128,131.31,53.66,205.66a8,8,0,0,1-11.32-11.32l80-80a8,8,0,0,1,11.32,0Zm-160-68.68L128,51.31l74.34,74.35a8,8,0,0,0,11.32-11.32l-80-80a8,8,0,0,0-11.32,0l-80,80a8,8,0,0,0,11.32,11.32Z" />
+                </svg>
+              </button>
+            </div>
+            <div className="h-[calc(100%-2rem)]">
+              <FileTree
+                files={files}
+                activeFileKey={activeFileKey}
+                viewedFileKeys={viewedFileKeys}
+                folderCommand={folderCommand}
+                onSelect={scrollToFile}
+                onToggleViewed={handleToggleFileViewed}
+              />
+            </div>
+          </aside>
+        )}
+        <div className="min-w-0 flex-1">
+          {files.map((file) => (
+            <FileDiff
+              key={fileKey(file)}
+              file={file}
+              viewType={viewMode}
+              viewed={viewedFileKeys?.has(fileKey(file)) ?? false}
+              collapsed={collapsedFileKeys.has(fileKey(file))}
+              widgets={widgetsByFile?.[fileKey(file)]}
+              fileComments={fileWidgets?.[fileKey(file)]}
+              onGutterClick={onGutterClick}
+              onToggleViewed={handleToggleFileViewed}
+              onToggleCollapsed={handleToggleFileCollapsed}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
