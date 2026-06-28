@@ -381,6 +381,13 @@ body {
   --repo-md-code-text: color-mix(in srgb, var(--foreground) 90%, var(--repo-md-accent));
 }
 
+.repo-markdown-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 48rem) 14rem;
+  gap: 2rem;
+  align-items: start;
+}
+
 .repo-markdown-viewer .lachesi-md {
   max-width: 48rem;
   font-size: 0.95rem;
@@ -439,6 +446,85 @@ body {
 .repo-markdown-viewer .lachesi-md th {
   background: var(--repo-md-accent-soft);
   color: var(--repo-md-accent);
+}
+
+.repo-markdown-outline {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 7rem);
+  overflow: auto;
+  border-left: 1px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.repo-markdown-outline-toggle {
+  display: inline-flex;
+  width: 100%;
+  height: 1.75rem;
+  align-items: center;
+  gap: 0.35rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-weight: 600;
+}
+
+.repo-markdown-outline-toggle:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.repo-markdown-outline-toggle svg:last-child {
+  margin-left: auto;
+}
+
+.repo-markdown-outline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin-top: 0.35rem;
+}
+
+.repo-markdown-outline-item {
+  display: block;
+  width: 100%;
+  min-height: 1.45rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-markdown-outline-item:hover {
+  background: var(--repo-md-accent-soft);
+  color: var(--repo-md-accent);
+}
+
+.repo-markdown-outline-empty {
+  display: block;
+  padding: 0.35rem 0.5rem;
+}
+
+@media (max-width: 1100px) {
+  .repo-markdown-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .repo-markdown-outline {
+    order: -1;
+    position: static;
+    max-height: none;
+    border-left: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 0 0.75rem;
+  }
 }
 
 .repo-diff-line {
