@@ -7,11 +7,11 @@ import {
   MagnifyingGlass,
 } from "@phosphor-icons/react";
 import type React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type HighlightNode, highlightCode } from "@/lib/highlight";
 import { tauriCall } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
-import type { RepositoryFileContent, RepositoryFileEntry } from "@/types";
+import type { RepositoryBlameLine, RepositoryFileContent, RepositoryFileEntry } from "@/types";
 
 type DirectoryNode = {
   type: "directory";
@@ -29,6 +29,11 @@ type FileNode = {
 };
 
 type TreeNode = DirectoryNode | FileNode;
+
+type BlameCacheEntry =
+  | { status: "loading"; lines: RepositoryBlameLine[]; error: null }
+  | { status: "ready"; lines: RepositoryBlameLine[]; error: null }
+  | { status: "failed"; lines: RepositoryBlameLine[]; error: string };
 
 export interface RepositoryExplorerPanelProps {
   workspace: string | null;
@@ -111,6 +116,17 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatBlameTime(authorTime: number | null): string | null {
+  if (authorTime == null) return null;
+  return new Date(authorTime * 1000).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 interface RepositoryTreeRowsProps {
   nodes: TreeNode[];
   level: number;
@@ -186,9 +202,17 @@ function RepositoryTreeRows({
 function RepositoryCodeViewer({
   file,
   selectedLine,
+  selectedBlame,
+  blameLoading,
+  blameError,
+  onSelectLine,
 }: {
   file: RepositoryFileContent | null;
   selectedLine: number | null;
+  selectedBlame: RepositoryBlameLine | null;
+  blameLoading: boolean;
+  blameError: string | null;
+  onSelectLine: (line: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lines = useMemo(() => file?.content.split("\n") ?? [], [file]);
@@ -201,7 +225,9 @@ function RepositoryCodeViewer({
   useEffect(() => {
     if (!filePath || !selectedLine || !scrollRef.current) return;
     const target = scrollRef.current.querySelector(`[data-line="${selectedLine}"]`);
-    target?.scrollIntoView({ block: "center" });
+    if (target instanceof HTMLElement && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "center" });
+    }
   }, [filePath, selectedLine]);
 
   if (!file) {
@@ -219,16 +245,44 @@ function RepositoryCodeViewer({
           const lineNumber = index + 1;
           const active = selectedLine === lineNumber;
           const highlighted = highlightedLines[index];
+          const blameTime = active ? formatBlameTime(selectedBlame?.authorTime ?? null) : null;
           return (
-            <div
-              key={`${file.path}:${lineNumber}`}
-              data-line={lineNumber}
-              className={cn("repo-code-line", active && "repo-code-line--active")}
-            >
-              <span className="repo-code-gutter">{lineNumber}</span>
-              <code className="repo-code-content">
-                {highlighted ? renderHighlightedNodes(highlighted, `${lineNumber}`) : line}
-              </code>
+            <div key={`${file.path}:${lineNumber}`} data-line={lineNumber}>
+              <button
+                type="button"
+                className={cn("repo-code-line", active && "repo-code-line--active")}
+                onClick={() => onSelectLine(lineNumber)}
+                aria-label={`Select line ${lineNumber}`}
+              >
+                <span className="repo-code-gutter">{lineNumber}</span>
+                <code className="repo-code-content">
+                  {highlighted ? renderHighlightedNodes(highlighted, `${lineNumber}`) : line}
+                </code>
+              </button>
+              {active && (
+                <div className="repo-blame-popover">
+                  {blameLoading ? (
+                    <span className="text-muted-foreground">Loading blame...</span>
+                  ) : blameError ? (
+                    <span className="text-destructive">{blameError}</span>
+                  ) : selectedBlame ? (
+                    <>
+                      <span className="font-medium text-foreground">
+                        {selectedBlame.author ?? "Unknown author"}
+                      </span>
+                      {blameTime && <span>{blameTime}</span>}
+                      <span className="font-mono">{selectedBlame.shortSha}</span>
+                      {selectedBlame.summary && (
+                        <span className="min-w-0 truncate">{selectedBlame.summary}</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      No blame information for this line.
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -254,6 +308,7 @@ export function RepositoryExplorerPanel({
   const [error, setError] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
   const [collapsedDirectories, setCollapsedDirectories] = useState<Set<string>>(() => new Set());
+  const [blameByPath, setBlameByPath] = useState<Record<string, BlameCacheEntry>>({});
 
   const normalizedFilterQuery = filterQuery.trim().toLowerCase();
   const filteredFiles = useMemo(() => {
@@ -266,6 +321,44 @@ export function RepositoryExplorerPanel({
     allDirectoryPaths.length > 0 &&
     allDirectoryPaths.every((path) => collapsedDirectories.has(path));
   const breadcrumbs = selectedPath?.split("/").filter(Boolean) ?? [];
+  const selectedBlameCache = selectedPath ? blameByPath[selectedPath] : undefined;
+  const selectedBlame = useMemo(() => {
+    if (!selectedLine || !selectedBlameCache) return null;
+    return selectedBlameCache.lines.find((entry) => entry.line === selectedLine) ?? null;
+  }, [selectedBlameCache, selectedLine]);
+  const blameLoading = selectedBlameCache?.status === "loading";
+  const blameError = selectedBlameCache?.status === "failed" ? selectedBlameCache.error : null;
+
+  const loadBlameForPath = useCallback(
+    (path: string) => {
+      if (!workspace || !repo) return;
+      const current = blameByPath[path];
+      if (current?.status === "loading" || current?.status === "ready") return;
+
+      setBlameByPath((previous) => ({
+        ...previous,
+        [path]: { status: "loading", lines: [], error: null },
+      }));
+      tauriCall<RepositoryBlameLine[]>("get_repository_file_blame", { workspace, repo, path })
+        .then((lines) => {
+          setBlameByPath((previous) => ({
+            ...previous,
+            [path]: { status: "ready", lines, error: null },
+          }));
+        })
+        .catch((err: unknown) => {
+          setBlameByPath((previous) => ({
+            ...previous,
+            [path]: {
+              status: "failed",
+              lines: [],
+              error: err instanceof Error ? err.message : String(err),
+            },
+          }));
+        });
+    },
+    [blameByPath, repo, workspace],
+  );
 
   useEffect(() => {
     setSelectedPath(initialPath ?? null);
@@ -277,6 +370,7 @@ export function RepositoryExplorerPanel({
     let cancelled = false;
     setLoadingFiles(true);
     setError(null);
+    setBlameByPath({});
     tauriCall<RepositoryFileEntry[]>("list_repository_files", { workspace, repo })
       .then((nextFiles) => {
         if (cancelled) return;
@@ -296,6 +390,11 @@ export function RepositoryExplorerPanel({
       cancelled = true;
     };
   }, [workspace, repo]);
+
+  useEffect(() => {
+    if (!selectedPath || selectedLine == null) return;
+    loadBlameForPath(selectedPath);
+  }, [loadBlameForPath, selectedLine, selectedPath]);
 
   useEffect(() => {
     if (!workspace || !repo || !selectedPath) {
@@ -330,6 +429,13 @@ export function RepositoryExplorerPanel({
     setSelectedPath(file.path);
     setSelectedLine(null);
     onSelectFile?.(file.path, null);
+  };
+
+  const handleSelectLine = (line: number) => {
+    if (!selectedPath) return;
+    setSelectedLine(line);
+    loadBlameForPath(selectedPath);
+    onSelectFile?.(selectedPath, line);
   };
 
   const handleToggleDirectory = (path: string) => {
@@ -450,7 +556,14 @@ export function RepositoryExplorerPanel({
             {contentError}
           </div>
         ) : (
-          <RepositoryCodeViewer file={content} selectedLine={selectedLine} />
+          <RepositoryCodeViewer
+            file={content}
+            selectedLine={selectedLine}
+            selectedBlame={selectedBlame}
+            blameLoading={blameLoading}
+            blameError={blameError}
+            onSelectLine={handleSelectLine}
+          />
         )}
       </div>
     </section>

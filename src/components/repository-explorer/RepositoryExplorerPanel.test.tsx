@@ -72,4 +72,25 @@ describe("RepositoryExplorerPanel", () => {
     expect(within(fileTree).getByRole("button", { name: /App\.tsx/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse all" })).toBeInTheDocument();
   });
+
+  it("loads blame details when a file line is selected", async () => {
+    const user = userEvent.setup();
+    const onSelectFile = vi.fn();
+    render(
+      <RepositoryExplorerPanel
+        workspace="example-workspace"
+        repo="frontend-app"
+        onSelectFile={onSelectFile}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Select line 4" }));
+
+    expect(onSelectFile).toHaveBeenCalledWith("src/App.tsx", 4);
+    await waitFor(() => {
+      expect(screen.getByText("Grace Hopper")).toBeInTheDocument();
+    });
+    expect(screen.getByText("6f52c9a1")).toBeInTheDocument();
+    expect(screen.getByText("Update fixture file")).toBeInTheDocument();
+  });
 });

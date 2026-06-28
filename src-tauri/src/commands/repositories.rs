@@ -62,7 +62,21 @@ pub struct RepositoryFileContent {
     pub truncated: bool,
 }
 
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryBlameLine {
+    pub line: u32,
+    pub sha: String,
+    pub short_sha: String,
+    pub author: Option<String>,
+    pub author_email: Option<String>,
+    pub author_time: Option<i64>,
+    pub summary: Option<String>,
+}
+
 const MAX_REPOSITORY_FILE_BYTES: u64 = 512 * 1024;
+const GIT_BLAME_NO_COMMIT_ERROR: &str = "fatal: no such ref: HEAD";
+const GIT_BLAME_NO_PATH: &str = "fatal: no such path";
 
 fn git_command(repo_path: &Path) -> Command {
     let mut cmd = Command::new("/usr/bin/git");
@@ -357,6 +371,77 @@ fn safe_repo_file_path(repo_path: &Path, path: &str) -> Result<PathBuf, String> 
     Ok(canonical_file)
 }
 
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(8).collect()
+}
+
+fn strip_mail_brackets(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .to_string()
+}
+
+fn parse_blame_header(line: &str) -> Option<(String, u32)> {
+    let mut parts = line.split_whitespace();
+    let sha = parts.next()?;
+    if sha.len() < 7 || !sha.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    let _original_line = parts.next()?.parse::<u32>().ok()?;
+    let final_line = parts.next()?.parse::<u32>().ok()?;
+    Some((sha.to_string(), final_line))
+}
+
+fn parse_git_blame_line_porcelain(output: &str) -> Vec<RepositoryBlameLine> {
+    let mut entries = Vec::new();
+    let mut current: Option<RepositoryBlameLine> = None;
+
+    for line in output.lines() {
+        if let Some((sha, final_line)) = parse_blame_header(line) {
+            if let Some(entry) = current.take() {
+                entries.push(entry);
+            }
+            current = Some(RepositoryBlameLine {
+                line: final_line,
+                short_sha: short_sha(&sha),
+                sha,
+                author: None,
+                author_email: None,
+                author_time: None,
+                summary: None,
+            });
+            continue;
+        }
+
+        let Some(entry) = current.as_mut() else {
+            continue;
+        };
+
+        if line.starts_with('\t') {
+            if let Some(entry) = current.take() {
+                entries.push(entry);
+            }
+        } else if let Some(author) = line.strip_prefix("author ") {
+            entry.author = Some(author.to_string());
+        } else if let Some(author_email) = line.strip_prefix("author-mail ") {
+            entry.author_email = Some(strip_mail_brackets(author_email));
+        } else if let Some(author_time) = line.strip_prefix("author-time ") {
+            entry.author_time = author_time.parse::<i64>().ok();
+        } else if let Some(summary) = line.strip_prefix("summary ") {
+            entry.summary = Some(summary.to_string());
+        }
+    }
+
+    if let Some(entry) = current {
+        entries.push(entry);
+    }
+
+    entries.sort_by_key(|entry| entry.line);
+    entries
+}
+
 fn fetch_repo(repo_path: &Path) -> Result<(), String> {
     run_git_checked(repo_path, &["fetch", "--prune", "origin"])?;
     Ok(())
@@ -430,6 +515,36 @@ pub fn read_repository_file(
 }
 
 #[tauri::command]
+pub fn get_repository_file_blame(
+    workspace: String,
+    repo: String,
+    path: String,
+) -> Result<Vec<RepositoryBlameLine>, String> {
+    let repo_path = configured_repo(&workspace, &repo)?;
+    let _file_path = safe_repo_file_path(&repo_path, &path)?;
+    let (code, stdout, stderr) = run_git(&repo_path, &["blame", "--line-porcelain", "--", &path])?;
+    if code == Some(0) {
+        return Ok(parse_git_blame_line_porcelain(&stdout));
+    }
+
+    let trimmed = stderr.trim();
+    if trimmed == GIT_BLAME_NO_COMMIT_ERROR || trimmed.contains(GIT_BLAME_NO_PATH) {
+        return Ok(Vec::new());
+    }
+
+    Err(format!(
+        "git blame failed with code {:?}: {}{}",
+        code,
+        trimmed,
+        if stdout.trim().is_empty() {
+            String::new()
+        } else {
+            format!("\nstdout: {}", stdout.trim())
+        }
+    ))
+}
+
+#[tauri::command]
 pub fn checkout_repository_branch(
     workspace: String,
     repo: String,
@@ -459,7 +574,9 @@ pub fn pull_repository(workspace: String, repo: String) -> Result<RepositoryWork
 
 #[cfg(test)]
 mod tests {
-    use super::{local_branch_for_remote, validate_repo_relative_path};
+    use super::{
+        local_branch_for_remote, parse_git_blame_line_porcelain, validate_repo_relative_path,
+    };
 
     #[test]
     fn maps_origin_remote_to_local_branch_name() {
@@ -477,5 +594,37 @@ mod tests {
         assert!(validate_repo_relative_path("../secrets").is_err());
         assert!(validate_repo_relative_path("/tmp/secrets").is_err());
         assert!(validate_repo_relative_path("").is_err());
+    }
+
+    #[test]
+    fn parses_git_blame_line_porcelain() {
+        let output = r#"6f52c9a1cf5cd075762f13d0b0f8bf8d0f4f3f7d 10 1 1
+author Ada Lovelace
+author-mail <ada@example.com>
+author-time 1710000000
+summary Add formatter
+filename src/lib/format.ts
+	export function formatCurrency() {}
+0000000000000000000000000000000000000000 2 2 1
+author Not Committed Yet
+author-mail <not.committed.yet>
+author-time 1710000100
+summary Version of src/lib/format.ts from working tree
+filename src/lib/format.ts
+	return "$0.00";
+"#;
+
+        let entries = parse_git_blame_line_porcelain(output);
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].line, 1);
+        assert_eq!(entries[0].short_sha, "6f52c9a1");
+        assert_eq!(entries[0].author.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(entries[0].author_email.as_deref(), Some("ada@example.com"));
+        assert_eq!(entries[0].author_time, Some(1710000000));
+        assert_eq!(entries[0].summary.as_deref(), Some("Add formatter"));
+        assert_eq!(entries[1].line, 2);
+        assert_eq!(entries[1].short_sha, "00000000");
+        assert_eq!(entries[1].author.as_deref(), Some("Not Committed Yet"));
     }
 }
