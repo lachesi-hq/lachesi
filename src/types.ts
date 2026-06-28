@@ -31,11 +31,29 @@ export interface RepositoryWorktreeState {
   error: string | null;
 }
 
+export interface RepositoryFileEntry {
+  path: string;
+}
+
+export interface RepositoryFileContent {
+  path: string;
+  content: string;
+  size: number;
+  truncated: boolean;
+}
+
 export type AppSelection =
   | { kind: "pr-list" }
   | { kind: "overview" }
   | { kind: "settings" }
-  | { kind: "pr"; workspace: string; repo: string; prId: number; activeFilePath: string | null };
+  | {
+      kind: "pr";
+      workspace: string;
+      repo: string;
+      prId: number;
+      activeFilePath: string | null;
+      activeFileLine?: number | null;
+    };
 
 export type PrState = "OPEN" | "MERGED" | "DECLINED" | "SUPERSEDED";
 

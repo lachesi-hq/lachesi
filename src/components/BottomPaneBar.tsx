@@ -1,12 +1,19 @@
 import {
   ClockCounterClockwise,
+  FileMagnifyingGlass,
   GitBranch,
   GitPullRequest,
   Rows,
   Sparkle,
 } from "@phosphor-icons/react";
 
-export type AppPaneId = "pullRequests" | "repositories" | "reviewHistory" | "details" | "aiReview";
+export type AppPaneId =
+  | "pullRequests"
+  | "repositories"
+  | "reviewHistory"
+  | "repositoryExplorer"
+  | "details"
+  | "aiReview";
 
 export interface BottomPaneBarProps {
   panes: Record<AppPaneId, boolean>;
@@ -24,6 +31,12 @@ const PANE_CONFIG: Array<{
   { id: "pullRequests", label: "Pull requests", Icon: GitPullRequest, group: "left" },
   { id: "repositories", label: "Repositories", Icon: GitBranch, group: "left" },
   { id: "reviewHistory", label: "Review history", Icon: ClockCounterClockwise, group: "left" },
+  {
+    id: "repositoryExplorer",
+    label: "Repository explorer",
+    Icon: FileMagnifyingGlass,
+    group: "left",
+  },
   { id: "details", label: "Details", Icon: Rows, group: "left" },
   { id: "aiReview", label: "AI review", Icon: Sparkle, group: "right" },
 ];

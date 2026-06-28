@@ -61,6 +61,7 @@ export interface AiReviewPanelProps {
   onSelectThread?: (threadId: string) => Promise<void> | void;
   onClearThread?: (threadId: string) => void;
   onClose: () => void;
+  onOpenFile?: (path: string, line?: number | null) => void;
   expanded?: boolean;
   onToggleExpand?: () => void;
   onStageComments?: () => Promise<StageCommentsResult>;
@@ -455,6 +456,7 @@ export function AiReviewPanel({
   onStartFix,
   onCommit,
   onPush,
+  onOpenFile,
 }: AiReviewPanelProps) {
   const [copied, setCopied] = useState(false);
   const [clockMs, setClockMs] = useState(() => Date.now());
@@ -1194,9 +1196,21 @@ export function AiReviewPanel({
                         <p className="mt-2 text-sm font-medium text-foreground">{finding.title}</p>
                         <p className="mt-1 text-sm text-muted-foreground">{finding.summary}</p>
                         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                          <span>
-                            {findingAnchorLabel(finding, publication?.publicationMode ?? null)}
-                          </span>
+                          {finding.anchor && onOpenFile ? (
+                            <button
+                              type="button"
+                              className="font-mono text-muted-foreground hover:text-foreground"
+                              onClick={() =>
+                                onOpenFile(finding.anchor?.path ?? "", finding.anchor?.startLine)
+                              }
+                            >
+                              {findingAnchorLabel(finding, publication?.publicationMode ?? null)}
+                            </button>
+                          ) : (
+                            <span>
+                              {findingAnchorLabel(finding, publication?.publicationMode ?? null)}
+                            </span>
+                          )}
                           <span>{titleCase(finding.confidence)} confidence</span>
                           {publication?.latestPublishedAt &&
                             publication.alreadyPublished &&

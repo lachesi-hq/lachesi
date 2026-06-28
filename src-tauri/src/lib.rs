@@ -104,6 +104,8 @@ pub fn run() {
             context::get_jira_issue,
             context::get_notion_page,
             repositories::list_repository_worktrees,
+            repositories::list_repository_files,
+            repositories::read_repository_file,
             repositories::checkout_repository_branch,
             repositories::fetch_repository,
             repositories::pull_repository,

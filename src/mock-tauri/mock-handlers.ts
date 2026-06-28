@@ -10,6 +10,8 @@ import type {
   PrComment,
   PrListFilter,
   PullRequestPage,
+  RepositoryFileContent,
+  RepositoryFileEntry,
   ReviewFinding,
   ReviewFindingPublication,
   ReviewFindingPublicationEvent,
@@ -65,6 +67,61 @@ let mockReviewJobs: AiReviewJob[] = [
     finishedAt: null,
   },
 ];
+
+const mockRepositoryFiles: RepositoryFileEntry[] = [
+  { path: "src/App.tsx" },
+  { path: "src/components/orders/OrderTable.tsx" },
+  { path: "src/components/orders/OrderDetails.tsx" },
+  { path: "src/lib/api.ts" },
+  { path: "src/lib/format.ts" },
+  { path: "package.json" },
+  { path: "README.md" },
+];
+
+const mockRepositoryFileContents: Record<string, string> = {
+  "src/App.tsx": `import { OrderTable } from "./components/orders/OrderTable";
+
+export function App() {
+  return <OrderTable />;
+}
+`,
+  "src/components/orders/OrderTable.tsx": `export function OrderTable() {
+  return (
+    <table>
+      <tbody>
+        <tr>
+          <td>ORD-1001</td>
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+`,
+  "src/components/orders/OrderDetails.tsx": `export function OrderDetails() {
+  return <section>Order details</section>;
+}
+`,
+  "src/lib/api.ts": `export async function getOrders() {
+  return [];
+}
+`,
+  "src/lib/format.ts": `export function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(value);
+}
+`,
+  "package.json": `{
+  "name": "frontend-app",
+  "private": true
+}
+`,
+  "README.md": `# Frontend app
+
+Mock repository fixture for Lachesi browser development.
+`,
+};
 
 /** localStorage-backed store that simulates on-disk review persistence for browser dev mode. */
 const REVIEW_STORE_KEY = "lachesi.mock.reviews";
@@ -501,6 +558,20 @@ export const mockHandlers: Record<string, Handler> = {
       error: "No local path configured in Settings.",
     },
   ],
+  list_repository_files: () => mockRepositoryFiles,
+  read_repository_file: (args) => {
+    const path = String(args?.path ?? "");
+    const content = mockRepositoryFileContents[path];
+    if (content == null) {
+      throw new Error(`Mock file not found: ${path}`);
+    }
+    return {
+      path,
+      content,
+      size: new TextEncoder().encode(content).length,
+      truncated: false,
+    } satisfies RepositoryFileContent;
+  },
   checkout_repository_branch: (args) => ({
     workspace: String(args?.workspace ?? "example-workspace"),
     repo: String(args?.repo ?? "frontend-app"),
