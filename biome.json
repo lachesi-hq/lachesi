@@ -9,6 +9,9 @@
     "ignoreUnknown": true,
     "includes": [
       "**",
+      "!**/.astro",
+      "!**/dist",
+      "!apps/web/**/*.astro",
       "!dist",
       "!src-tauri/target",
       "!storybook-static",
