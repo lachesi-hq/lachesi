@@ -19,6 +19,7 @@ import type {
   ReviewFindingPublicationEvent,
 } from "@/types";
 import {
+  mockClosedPrMetrics,
   mockComments,
   mockConfig,
   mockDiffstat,
@@ -774,6 +775,12 @@ export const mockHandlers: Record<string, Handler> = {
     };
     return page;
   },
+
+  list_closed_pr_metrics: () => ({ metrics: mockClosedPrMetrics, syncedCount: 0 }),
+  sync_closed_pr_metrics: () => ({
+    metrics: mockClosedPrMetrics,
+    syncedCount: mockClosedPrMetrics.length,
+  }),
 
   get_pull_request: () => mockPullRequestDetailState,
   approve_pull_request: () => {
