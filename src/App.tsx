@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { type AppPaneId, BottomPaneBar } from "@/components/BottomPaneBar";
+import { ClosedPrAnalyticsPanel } from "@/components/overview/ClosedPrAnalyticsPanel";
 import { OverviewPanel } from "@/components/overview/OverviewPanel";
 import { PrDetailPanel } from "@/components/pr-detail/PrDetailPanel";
 import type { AuthorOption } from "@/components/pr-sidebar/AuthorFilter";
@@ -15,6 +16,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAiReview } from "@/hooks/useAiReview";
 import { useAiReviewFix } from "@/hooks/useAiReviewFix";
 import { useAutomaticSyncPolling } from "@/hooks/useAutomaticSyncPolling";
+import { useClosedPrAnalytics } from "@/hooks/useClosedPrAnalytics";
 import { useConfig } from "@/hooks/useConfig";
 import { useCredentials } from "@/hooks/useCredentials";
 import { authorKey, useCurrentUser } from "@/hooks/useCurrentUser";
@@ -88,6 +90,7 @@ export default function App() {
   const repos = config?.repos ?? EMPTY_REPOS;
   const reposKey = repos.map(repoKey).join("|");
   const { groups, loading, refresh, loadMore } = usePullRequests(repos, filter);
+  const closedPrAnalytics = useClosedPrAnalytics(repos);
   const currentUser = useCurrentUser(repos.length > 0);
   const activeSel = selection.kind === "pr" ? selection : null;
   const activeRepo = activeSel
@@ -376,7 +379,11 @@ export default function App() {
   }, [config]);
 
   useEffect(() => {
-    if (selection.kind === "overview" || selection.kind === "settings") {
+    if (
+      selection.kind === "overview" ||
+      selection.kind === "closed-analytics" ||
+      selection.kind === "settings"
+    ) {
       setRepositoriesPanelOpen(false);
       setReviewHistoryPanelOpen(false);
       setRepositoryExplorerOpen(false);
@@ -470,7 +477,10 @@ export default function App() {
         setSelection({ kind: "overview" });
         return;
       }
-      if (e.key === "Escape" && selection.kind === "overview") {
+      if (
+        e.key === "Escape" &&
+        (selection.kind === "overview" || selection.kind === "closed-analytics")
+      ) {
         e.preventDefault();
         setSelection({ kind: "pr-list" });
         return;
@@ -512,6 +522,7 @@ export default function App() {
   }, [displayedGroups, activeSel, selection]);
 
   const isOverview = selection.kind === "overview";
+  const isClosedAnalytics = selection.kind === "closed-analytics";
   const openPaneCount = [
     sidebarOpen,
     repositoriesPanelOpen,
@@ -1009,7 +1020,7 @@ export default function App() {
       <AppShell
         headerRight={<ThemeToggle theme={theme} onToggle={toggle} />}
         footer={
-          isOverview || selection.kind === "settings" ? undefined : (
+          isOverview || isClosedAnalytics || selection.kind === "settings" ? undefined : (
             <BottomPaneBar
               panes={{
                 pullRequests: sidebarOpen,
@@ -1069,7 +1080,10 @@ export default function App() {
           ) : undefined
         }
         sidebar={
-          isOverview || selection.kind === "settings" || !sidebarOpen ? undefined : (
+          isOverview ||
+          isClosedAnalytics ||
+          selection.kind === "settings" ||
+          !sidebarOpen ? undefined : (
             <PrSidebar
               groups={displayedGroups}
               filter={filter}
@@ -1093,6 +1107,7 @@ export default function App() {
               onRefresh={refresh}
               onOpenSettings={() => setSelection({ kind: "settings" })}
               onOpenOverview={() => setSelection({ kind: "overview" })}
+              onOpenClosedAnalytics={() => setSelection({ kind: "closed-analytics" })}
             />
           )
         }
@@ -1103,8 +1118,20 @@ export default function App() {
               loading={loading}
               onRefresh={refresh}
               onBack={() => setSelection({ kind: "pr-list" })}
+              onOpenClosedAnalytics={() => setSelection({ kind: "closed-analytics" })}
               onSelectPr={(pr) => selectPullRequest(pr)}
               currentUser={currentUser}
+            />
+          ) : isClosedAnalytics ? (
+            <ClosedPrAnalyticsPanel
+              metrics={closedPrAnalytics.metrics}
+              loading={closedPrAnalytics.loading}
+              syncing={closedPrAnalytics.syncing}
+              error={closedPrAnalytics.error}
+              lastSyncedCount={closedPrAnalytics.lastSyncedCount}
+              onSync={closedPrAnalytics.sync}
+              onBack={() => setSelection({ kind: "pr-list" })}
+              onSelectPr={(pr) => selectPullRequest(pr)}
             />
           ) : selection.kind === "settings" ? (
             <SettingsPage

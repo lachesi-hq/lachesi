@@ -71,6 +71,7 @@ export interface RepositoryBlameLine {
 export type AppSelection =
   | { kind: "pr-list" }
   | { kind: "overview" }
+  | { kind: "closed-analytics" }
   | { kind: "settings" }
   | {
       kind: "pr";
@@ -453,6 +454,47 @@ export interface PullRequestPage {
 }
 
 export type PrListFilter = "OPEN" | "DRAFT" | "MERGED" | "ALL";
+
+export type ClosedPrImpact = "low" | "medium" | "high";
+
+export interface ClosedPrCount {
+  key: string;
+  count: number;
+}
+
+export interface ClosedPrRiskSummary {
+  hasAiReview: boolean;
+  impact: ClosedPrImpact;
+  totalFindings: number;
+  highOrCriticalFindings: number;
+  severityCounts: ClosedPrCount[];
+  categoryCounts: ClosedPrCount[];
+}
+
+export interface ClosedPrMetric {
+  workspace: string;
+  repo: string;
+  prId: number;
+  title: string;
+  authorDisplayName: string;
+  authorAccountId: string | null;
+  state: PrState;
+  sourceBranch: string;
+  destinationBranch: string;
+  createdOn: string;
+  updatedOn: string;
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+  diffstatCached: boolean;
+  risk: ClosedPrRiskSummary;
+  syncedAt: string;
+}
+
+export interface ClosedPrAnalyticsSnapshot {
+  metrics: ClosedPrMetric[];
+  syncedCount: number;
+}
 
 export type DiffViewMode = "unified" | "split" | "conversation";
 export type ReviewTerminal = "wezterm" | "iterm" | "terminal";

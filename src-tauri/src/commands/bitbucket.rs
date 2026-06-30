@@ -7,6 +7,7 @@ use crate::config::{self, AppConfig, RepoRef};
 use crate::config::{AiProvider, ReviewTerminal};
 use crate::credentials::{self, Credentials};
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
+use crate::review_storage::{self, ClosedPrMetric};
 
 const BASE: &str = "https://api.bitbucket.org/2.0";
 
@@ -382,6 +383,13 @@ pub struct DiffstatEntry {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ClosedPrAnalyticsSnapshot {
+    metrics: Vec<ClosedPrMetric>,
+    synced_count: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InlineAnchor {
     path: String,
     to: Option<u32>,
@@ -430,6 +438,12 @@ pub struct ListPrOptions {
     page: Option<u32>,
     pagelen: Option<u32>,
     query: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosedPrAnalyticsOptions {
+    limit_per_state: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -547,6 +561,88 @@ fn fetch_pull_request_detail(
     let url = format!("{}/pullrequests/{id}", repo_base(workspace, repo)?);
     let bb: BbPrDetail = get_json(client.get(&url))?;
     Ok(map_pr_detail(bb))
+}
+
+fn now_ms() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().to_string())
+        .unwrap_or_else(|_| "0".to_string())
+}
+
+fn fetch_pull_requests_page(
+    client: &BitbucketClient,
+    workspace: &str,
+    repo: &str,
+    opts: &ListPrOptions,
+) -> Result<PullRequestPage, String> {
+    let url = format!("{}/pullrequests", repo_base(workspace, repo)?);
+    let page = opts.page.unwrap_or(1);
+    let pagelen = opts.pagelen.unwrap_or(30);
+    let mut query: Vec<(String, String)> = vec![
+        ("page".into(), page.to_string()),
+        ("pagelen".into(), pagelen.to_string()),
+        (
+            "fields".into(),
+            "size,page,next,values.id,values.title,values.state,values.draft,values.comment_count,values.created_on,values.updated_on,values.author.display_name,values.author.account_id,values.source.branch.name,values.destination.branch.name,values.participants.role,values.participants.approved,values.participants.user.display_name,values.participants.user.account_id".into(),
+        ),
+    ];
+    match opts.state.as_deref() {
+        Some("ALL") => {
+            for s in ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"] {
+                query.push(("state".into(), s.into()));
+            }
+        }
+        Some(s) => query.push(("state".into(), s.to_string())),
+        None => query.push(("state".into(), "OPEN".into())),
+    }
+    if let Some(q) = opts.query.as_ref().filter(|q| !q.is_empty()) {
+        query.push(("q".into(), format!("title ~ \"{}\"", q.replace('"', ""))));
+    }
+    let bb: BbPrPage = get_json(client.get(&url).query(&query))?;
+    Ok(PullRequestPage {
+        values: bb.values.into_iter().map(map_pr_summary).collect(),
+        size: bb.size,
+        page: bb.page.max(1),
+        has_next: bb.next.is_some(),
+    })
+}
+
+fn fetch_diffstat_entries(
+    client: &BitbucketClient,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Result<Vec<DiffstatEntry>, String> {
+    let mut url = format!(
+        "{}/pullrequests/{id}/diffstat?pagelen=100",
+        repo_base(workspace, repo)?
+    );
+    let mut out = Vec::new();
+    loop {
+        let page: BbDiffstatPage = get_json(client.get(&url))?;
+        out.extend(page.values.into_iter().map(map_diffstat));
+        match page.next {
+            Some(next) => url = next,
+            None => break,
+        }
+    }
+    Ok(out)
+}
+
+fn cached_closed_metrics_for_repos(repos: &[RepoRef]) -> Result<Vec<ClosedPrMetric>, String> {
+    if repos.is_empty() {
+        return Ok(Vec::new());
+    }
+    let metrics = review_storage::list_closed_pr_metrics()?;
+    Ok(metrics
+        .into_iter()
+        .filter(|metric| {
+            repos
+                .iter()
+                .any(|repo| repo.workspace == metric.workspace && repo.repo == metric.repo)
+        })
+        .collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -680,35 +776,108 @@ pub async fn list_pull_requests(
 ) -> Result<PullRequestPage, String> {
     run(move || {
         let client = BitbucketClient::from_stored()?;
-        let url = format!("{}/pullrequests", repo_base(&workspace, &repo)?);
-        let page = opts.page.unwrap_or(1);
-        let pagelen = opts.pagelen.unwrap_or(30);
-        let mut query: Vec<(String, String)> = vec![
-            ("page".into(), page.to_string()),
-            ("pagelen".into(), pagelen.to_string()),
-            (
-                "fields".into(),
-                "size,page,next,values.id,values.title,values.state,values.draft,values.comment_count,values.created_on,values.updated_on,values.author.display_name,values.author.account_id,values.source.branch.name,values.destination.branch.name,values.participants.role,values.participants.approved,values.participants.user.display_name,values.participants.user.account_id".into(),
-            ),
-        ];
-        match opts.state.as_deref() {
-            Some("ALL") => {
-                for s in ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"] {
-                    query.push(("state".into(), s.into()));
+        fetch_pull_requests_page(&client, &workspace, &repo, &opts)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn list_closed_pr_metrics(
+    repos: Vec<RepoRef>,
+) -> Result<ClosedPrAnalyticsSnapshot, String> {
+    run(move || {
+        Ok(ClosedPrAnalyticsSnapshot {
+            metrics: cached_closed_metrics_for_repos(&repos)?,
+            synced_count: 0,
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn sync_closed_pr_metrics(
+    repos: Vec<RepoRef>,
+    options: ClosedPrAnalyticsOptions,
+) -> Result<ClosedPrAnalyticsSnapshot, String> {
+    run(move || {
+        if repos.is_empty() {
+            return Ok(ClosedPrAnalyticsSnapshot {
+                metrics: Vec::new(),
+                synced_count: 0,
+            });
+        }
+
+        let client = BitbucketClient::from_stored()?;
+        let limit = options.limit_per_state.unwrap_or(25).clamp(1, 100);
+        let states = ["MERGED", "DECLINED", "SUPERSEDED"];
+        let mut synced_count = 0;
+
+        for repo_ref in &repos {
+            for state in states {
+                let page = fetch_pull_requests_page(
+                    &client,
+                    &repo_ref.workspace,
+                    &repo_ref.repo,
+                    &ListPrOptions {
+                        state: Some(state.to_string()),
+                        page: Some(1),
+                        pagelen: Some(limit),
+                        query: None,
+                    },
+                )?;
+
+                for pr in page.values {
+                    let diffstat =
+                        fetch_diffstat_entries(&client, &repo_ref.workspace, &repo_ref.repo, pr.id);
+                    let (additions, deletions, files_changed, diffstat_cached) = match diffstat {
+                        Ok(entries) => {
+                            let additions = entries.iter().map(|entry| entry.lines_added).sum();
+                            let deletions = entries.iter().map(|entry| entry.lines_removed).sum();
+                            (additions, deletions, entries.len() as u32, true)
+                        }
+                        Err(error) => {
+                            eprintln!(
+                                "Failed to sync diffstat for {}/{} #{}: {}",
+                                repo_ref.workspace, repo_ref.repo, pr.id, error
+                            );
+                            (0, 0, 0, false)
+                        }
+                    };
+                    let risk = review_storage::review_risk_summary(
+                        &repo_ref.workspace,
+                        &repo_ref.repo,
+                        pr.id,
+                        additions,
+                        deletions,
+                        files_changed,
+                    );
+                    review_storage::upsert_closed_pr_metric(&ClosedPrMetric {
+                        workspace: repo_ref.workspace.clone(),
+                        repo: repo_ref.repo.clone(),
+                        pr_id: pr.id,
+                        title: pr.title,
+                        author_display_name: pr.author_display_name,
+                        author_account_id: pr.author_account_id,
+                        state: pr.state,
+                        source_branch: pr.source_branch,
+                        destination_branch: pr.destination_branch,
+                        created_on: pr.created_on,
+                        updated_on: pr.updated_on,
+                        additions,
+                        deletions,
+                        files_changed,
+                        diffstat_cached,
+                        risk,
+                        synced_at: now_ms(),
+                    })?;
+                    synced_count += 1;
                 }
             }
-            Some(s) => query.push(("state".into(), s.to_string())),
-            None => query.push(("state".into(), "OPEN".into())),
         }
-        if let Some(q) = opts.query.as_ref().filter(|q| !q.is_empty()) {
-            query.push(("q".into(), format!("title ~ \"{}\"", q.replace('"', ""))));
-        }
-        let bb: BbPrPage = get_json(client.get(&url).query(&query))?;
-        Ok(PullRequestPage {
-            values: bb.values.into_iter().map(map_pr_summary).collect(),
-            size: bb.size,
-            page: bb.page.max(1),
-            has_next: bb.next.is_some(),
+
+        Ok(ClosedPrAnalyticsSnapshot {
+            metrics: cached_closed_metrics_for_repos(&repos)?,
+            synced_count,
         })
     })
     .await
@@ -779,20 +948,7 @@ pub async fn get_diffstat(
 ) -> Result<Vec<DiffstatEntry>, String> {
     run(move || {
         let client = BitbucketClient::from_stored()?;
-        let mut url = format!(
-            "{}/pullrequests/{id}/diffstat?pagelen=100",
-            repo_base(&workspace, &repo)?
-        );
-        let mut out = Vec::new();
-        loop {
-            let page: BbDiffstatPage = get_json(client.get(&url))?;
-            out.extend(page.values.into_iter().map(map_diffstat));
-            match page.next {
-                Some(next) => url = next,
-                None => break,
-            }
-        }
-        Ok(out)
+        fetch_diffstat_entries(&client, &workspace, &repo, id)
     })
     .await
 }

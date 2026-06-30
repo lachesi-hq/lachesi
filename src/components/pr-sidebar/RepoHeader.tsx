@@ -3,6 +3,7 @@ import {
   CaretDoubleDown,
   CaretDoubleUp,
   ChartBar,
+  ChartLineUp,
   GearSix,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ export interface RepoHeaderProps {
   onRefresh: () => void;
   onOpenSettings: () => void;
   onOpenOverview?: () => void;
+  onOpenClosedAnalytics?: () => void;
 }
 
 export function RepoHeader({
@@ -26,6 +28,7 @@ export function RepoHeader({
   onRefresh,
   onOpenSettings,
   onOpenOverview,
+  onOpenClosedAnalytics,
 }: RepoHeaderProps) {
   return (
     <div className="flex items-center gap-2 border-b border-border bg-muted px-3 py-2.5">
@@ -47,6 +50,18 @@ export function RepoHeader({
           title="Overview"
         >
           <ChartBar size={16} />
+        </Button>
+      )}
+      {onOpenClosedAnalytics && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="border border-border bg-muted hover:bg-secondary"
+          onClick={onOpenClosedAnalytics}
+          aria-label="Open closed PR analytics"
+          title="Closed analytics"
+        >
+          <ChartLineUp size={16} />
         </Button>
       )}
       {onToggleCollapseAll && repoCount > 1 && (

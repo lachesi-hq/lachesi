@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowsClockwise } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowsClockwise, ChartLineUp } from "@phosphor-icons/react";
 import { useState } from "react";
 import type { AuthorOption } from "@/components/pr-sidebar/AuthorFilter";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ export interface OverviewPanelProps {
   loading: boolean;
   onRefresh: () => void;
   onBack: () => void;
+  onOpenClosedAnalytics: () => void;
   onSelectPr: (pr: PullRequestSummary) => void;
   /** The currently authenticated user, used to pin "me" first in the filter. */
   currentUser: { displayName: string; accountId?: string | null } | null;
@@ -26,6 +27,7 @@ export function OverviewPanel({
   loading,
   onRefresh,
   onBack,
+  onOpenClosedAnalytics,
   onSelectPr,
   currentUser,
 }: OverviewPanelProps) {
@@ -79,6 +81,11 @@ export function OverviewPanel({
             </span>
           )}
         </div>
+
+        <Button variant="secondary" size="sm" onClick={onOpenClosedAnalytics}>
+          <ChartLineUp size={14} />
+          Closed analytics
+        </Button>
 
         {/* Author filter */}
         {authors.length > 0 && (

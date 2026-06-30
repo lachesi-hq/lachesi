@@ -90,6 +90,8 @@ pub fn run() {
             bitbucket::test_connection,
             bitbucket::get_current_user,
             bitbucket::list_pull_requests,
+            bitbucket::list_closed_pr_metrics,
+            bitbucket::sync_closed_pr_metrics,
             bitbucket::get_pull_request,
             bitbucket::approve_pull_request,
             bitbucket::get_branch_status,

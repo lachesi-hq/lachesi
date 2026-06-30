@@ -18,6 +18,14 @@ function loadCollapsed(): Set<string> {
   }
 }
 
+function persistCollapsed(next: Set<string>) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+  } catch {
+    // ignore storage failures
+  }
+}
+
 export interface PrSidebarActive {
   workspace: string;
   repo: string;
@@ -42,6 +50,7 @@ export interface PrSidebarProps {
   onRefresh: () => void;
   onOpenSettings: () => void;
   onOpenOverview?: () => void;
+  onOpenClosedAnalytics?: () => void;
 }
 
 export function PrSidebar({
@@ -62,25 +71,18 @@ export function PrSidebar({
   onRefresh,
   onOpenSettings,
   onOpenOverview,
+  onOpenClosedAnalytics,
 }: PrSidebarProps) {
   const totalPrs = groups.reduce((n, g) => n + g.pullRequests.length, 0);
   const draftCount = groups.reduce((n, g) => n + g.pullRequests.filter((pr) => pr.draft).length, 0);
   const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
-
-  const persist = (next: Set<string>) => {
-    try {
-      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
-    } catch {
-      // ignore storage failures
-    }
-  };
 
   const toggle = (key: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      persist(next);
+      persistCollapsed(next);
       return next;
     });
   };
@@ -90,7 +92,7 @@ export function PrSidebar({
   const toggleAll = () => {
     const next = allCollapsed ? new Set<string>() : new Set(allKeys);
     setCollapsed(next);
-    persist(next);
+    persistCollapsed(next);
   };
 
   return (
@@ -103,6 +105,7 @@ export function PrSidebar({
         onRefresh={onRefresh}
         onOpenSettings={onOpenSettings}
         onOpenOverview={onOpenOverview}
+        onOpenClosedAnalytics={onOpenClosedAnalytics}
       />
       <PrStateTabs value={filter} onChange={onFilterChange} counts={{ DRAFT: draftCount }} />
       <RepositoryFilter

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -58,6 +58,46 @@ pub struct ReviewJob {
     pub created_at: String,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosedPrCount {
+    pub key: String,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosedPrRiskSummary {
+    pub has_ai_review: bool,
+    pub impact: String,
+    pub total_findings: u32,
+    pub high_or_critical_findings: u32,
+    pub severity_counts: Vec<ClosedPrCount>,
+    pub category_counts: Vec<ClosedPrCount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosedPrMetric {
+    pub workspace: String,
+    pub repo: String,
+    pub pr_id: u32,
+    pub title: String,
+    pub author_display_name: String,
+    pub author_account_id: Option<String>,
+    pub state: String,
+    pub source_branch: String,
+    pub destination_branch: String,
+    pub created_on: String,
+    pub updated_on: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub files_changed: u32,
+    pub diffstat_cached: bool,
+    pub risk: ClosedPrRiskSummary,
+    pub synced_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,6 +225,38 @@ fn migrate(conn: &Connection) -> Result<(), String> {
 
         CREATE INDEX IF NOT EXISTS idx_ai_review_jobs_pr
           ON ai_review_jobs(workspace, repo, pr_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS closed_pr_metrics (
+          metric_key TEXT PRIMARY KEY,
+          workspace TEXT NOT NULL,
+          repo TEXT NOT NULL,
+          pr_id INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          author_display_name TEXT NOT NULL,
+          author_account_id TEXT,
+          state TEXT NOT NULL,
+          source_branch TEXT NOT NULL,
+          destination_branch TEXT NOT NULL,
+          created_on TEXT NOT NULL,
+          updated_on TEXT NOT NULL,
+          additions INTEGER NOT NULL DEFAULT 0,
+          deletions INTEGER NOT NULL DEFAULT 0,
+          files_changed INTEGER NOT NULL DEFAULT 0,
+          diffstat_cached INTEGER NOT NULL DEFAULT 0,
+          has_ai_review INTEGER NOT NULL DEFAULT 0,
+          impact TEXT NOT NULL DEFAULT 'low',
+          total_findings INTEGER NOT NULL DEFAULT 0,
+          high_or_critical_findings INTEGER NOT NULL DEFAULT 0,
+          severity_counts_json TEXT NOT NULL DEFAULT '[]',
+          category_counts_json TEXT NOT NULL DEFAULT '[]',
+          synced_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_closed_pr_metrics_repo
+          ON closed_pr_metrics(workspace, repo, updated_on);
+
+        CREATE INDEX IF NOT EXISTS idx_closed_pr_metrics_state
+          ON closed_pr_metrics(state, updated_on);
         "#,
     )
     .map_err(|e| e.to_string())?;
@@ -582,6 +654,243 @@ fn row_to_review_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewJob> {
     })
 }
 
+fn metric_key(workspace: &str, repo: &str, pr_id: u32) -> String {
+    format!("{workspace}_{repo}_{pr_id}")
+}
+
+fn counts_json(counts: &[ClosedPrCount]) -> Result<String, String> {
+    serde_json::to_string(counts).map_err(|e| e.to_string())
+}
+
+fn parse_counts_json(value: String) -> Vec<ClosedPrCount> {
+    serde_json::from_str(&value).unwrap_or_default()
+}
+
+fn sorted_counts(map: HashMap<String, u32>) -> Vec<ClosedPrCount> {
+    let mut counts: Vec<ClosedPrCount> = map
+        .into_iter()
+        .map(|(key, count)| ClosedPrCount { key, count })
+        .collect();
+    counts.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.key.cmp(&b.key)));
+    counts
+}
+
+fn impact_for_metrics(
+    additions: u32,
+    deletions: u32,
+    files_changed: u32,
+    total_findings: u32,
+    high_or_critical_findings: u32,
+) -> String {
+    let churn = additions.saturating_add(deletions);
+    if high_or_critical_findings > 0 || churn >= 500 || files_changed >= 20 {
+        "high".to_string()
+    } else if total_findings > 0 || churn >= 120 || files_changed >= 8 {
+        "medium".to_string()
+    } else {
+        "low".to_string()
+    }
+}
+
+pub fn review_risk_summary(
+    workspace: &str,
+    repo: &str,
+    pr_id: u32,
+    additions: u32,
+    deletions: u32,
+    files_changed: u32,
+) -> ClosedPrRiskSummary {
+    let Ok(Some(json)) = load_review_json(workspace, repo, pr_id) else {
+        return ClosedPrRiskSummary {
+            impact: impact_for_metrics(additions, deletions, files_changed, 0, 0),
+            ..ClosedPrRiskSummary::default()
+        };
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return ClosedPrRiskSummary {
+            has_ai_review: true,
+            impact: impact_for_metrics(additions, deletions, files_changed, 0, 0),
+            ..ClosedPrRiskSummary::default()
+        };
+    };
+
+    let has_threads = value
+        .get("threads")
+        .and_then(|threads| threads.as_array())
+        .is_some_and(|threads| !threads.is_empty());
+    let review_runs = value
+        .get("reviewRuns")
+        .and_then(|runs| runs.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let has_ai_review = has_threads || !review_runs.is_empty();
+    let latest_findings = review_runs
+        .iter()
+        .rev()
+        .filter_map(|run| run.get("findings").and_then(|findings| findings.as_array()))
+        .find(|findings| !findings.is_empty());
+
+    let mut severity_counts = HashMap::new();
+    let mut category_counts = HashMap::new();
+    let mut total_findings = 0;
+    let mut high_or_critical_findings = 0;
+
+    if let Some(findings) = latest_findings {
+        for finding in findings {
+            total_findings += 1;
+            let severity = finding
+                .get("severity")
+                .and_then(|severity| severity.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            if severity == "high" || severity == "critical" {
+                high_or_critical_findings += 1;
+            }
+            *severity_counts.entry(severity).or_insert(0) += 1;
+
+            let category = finding
+                .get("category")
+                .and_then(|category| category.as_str())
+                .unwrap_or("other")
+                .to_string();
+            *category_counts.entry(category).or_insert(0) += 1;
+        }
+    }
+
+    ClosedPrRiskSummary {
+        has_ai_review,
+        impact: impact_for_metrics(
+            additions,
+            deletions,
+            files_changed,
+            total_findings,
+            high_or_critical_findings,
+        ),
+        total_findings,
+        high_or_critical_findings,
+        severity_counts: sorted_counts(severity_counts),
+        category_counts: sorted_counts(category_counts),
+    }
+}
+
+pub fn upsert_closed_pr_metric(metric: &ClosedPrMetric) -> Result<(), String> {
+    let conn = open()?;
+    let severity_counts_json = counts_json(&metric.risk.severity_counts)?;
+    let category_counts_json = counts_json(&metric.risk.category_counts)?;
+    conn.execute(
+        r#"
+        INSERT INTO closed_pr_metrics (
+          metric_key, workspace, repo, pr_id, title, author_display_name, author_account_id,
+          state, source_branch, destination_branch, created_on, updated_on, additions, deletions,
+          files_changed, diffstat_cached, has_ai_review, impact, total_findings,
+          high_or_critical_findings, severity_counts_json, category_counts_json, synced_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+          ?19, ?20, ?21, ?22, ?23)
+        ON CONFLICT(metric_key) DO UPDATE SET
+          title = excluded.title,
+          author_display_name = excluded.author_display_name,
+          author_account_id = excluded.author_account_id,
+          state = excluded.state,
+          source_branch = excluded.source_branch,
+          destination_branch = excluded.destination_branch,
+          created_on = excluded.created_on,
+          updated_on = excluded.updated_on,
+          additions = excluded.additions,
+          deletions = excluded.deletions,
+          files_changed = excluded.files_changed,
+          diffstat_cached = excluded.diffstat_cached,
+          has_ai_review = excluded.has_ai_review,
+          impact = excluded.impact,
+          total_findings = excluded.total_findings,
+          high_or_critical_findings = excluded.high_or_critical_findings,
+          severity_counts_json = excluded.severity_counts_json,
+          category_counts_json = excluded.category_counts_json,
+          synced_at = excluded.synced_at
+        "#,
+        params![
+            metric_key(&metric.workspace, &metric.repo, metric.pr_id),
+            &metric.workspace,
+            &metric.repo,
+            i64::from(metric.pr_id),
+            &metric.title,
+            &metric.author_display_name,
+            &metric.author_account_id,
+            &metric.state,
+            &metric.source_branch,
+            &metric.destination_branch,
+            &metric.created_on,
+            &metric.updated_on,
+            i64::from(metric.additions),
+            i64::from(metric.deletions),
+            i64::from(metric.files_changed),
+            if metric.diffstat_cached { 1 } else { 0 },
+            if metric.risk.has_ai_review { 1 } else { 0 },
+            &metric.risk.impact,
+            i64::from(metric.risk.total_findings),
+            i64::from(metric.risk.high_or_critical_findings),
+            severity_counts_json,
+            category_counts_json,
+            &metric.synced_at
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn list_closed_pr_metrics() -> Result<Vec<ClosedPrMetric>, String> {
+    let conn = open()?;
+    let mut stmt = conn
+        .prepare(
+            r#"
+            SELECT workspace, repo, pr_id, title, author_display_name, author_account_id, state,
+              source_branch, destination_branch, created_on, updated_on, additions, deletions,
+              files_changed, diffstat_cached, has_ai_review, impact, total_findings,
+              high_or_critical_findings, severity_counts_json, category_counts_json, synced_at
+            FROM closed_pr_metrics
+            ORDER BY updated_on DESC, workspace ASC, repo ASC, pr_id DESC
+            "#,
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            let severity_counts_json: String = row.get(19)?;
+            let category_counts_json: String = row.get(20)?;
+            Ok(ClosedPrMetric {
+                workspace: row.get(0)?,
+                repo: row.get(1)?,
+                pr_id: row.get::<_, i64>(2)? as u32,
+                title: row.get(3)?,
+                author_display_name: row.get(4)?,
+                author_account_id: row.get(5)?,
+                state: row.get(6)?,
+                source_branch: row.get(7)?,
+                destination_branch: row.get(8)?,
+                created_on: row.get(9)?,
+                updated_on: row.get(10)?,
+                additions: row.get::<_, i64>(11)? as u32,
+                deletions: row.get::<_, i64>(12)? as u32,
+                files_changed: row.get::<_, i64>(13)? as u32,
+                diffstat_cached: row.get::<_, i64>(14)? != 0,
+                risk: ClosedPrRiskSummary {
+                    has_ai_review: row.get::<_, i64>(15)? != 0,
+                    impact: row.get(16)?,
+                    total_findings: row.get::<_, i64>(17)? as u32,
+                    high_or_critical_findings: row.get::<_, i64>(18)? as u32,
+                    severity_counts: parse_counts_json(severity_counts_json),
+                    category_counts: parse_counts_json(category_counts_json),
+                },
+                synced_at: row.get(21)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut metrics = Vec::new();
+    for row in rows {
+        metrics.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(metrics)
+}
+
 fn cleanup_legacy_review_files(keep_keys: &[String]) -> Result<(), String> {
     let dir = legacy_reviews_dir()?;
     let entries = fs::read_dir(&dir).map_err(|e| e.to_string())?;
@@ -763,6 +1072,114 @@ mod tests {
             assert_eq!(jobs[0].status, ReviewJobStatus::Succeeded);
             assert_eq!(jobs[0].trigger, "manual");
             assert_eq!(jobs[0].thread_id.as_deref(), Some("thread-1"));
+        });
+    }
+
+    #[test]
+    fn upserts_and_lists_closed_pr_metrics() {
+        with_test_data_dir("closed-pr-metrics", |_| {
+            let metric = ClosedPrMetric {
+                workspace: "workspace".to_string(),
+                repo: "repo".to_string(),
+                pr_id: 7,
+                title: "Close old endpoint".to_string(),
+                author_display_name: "Sam Author".to_string(),
+                author_account_id: Some("sam".to_string()),
+                state: "MERGED".to_string(),
+                source_branch: "feature/endpoint".to_string(),
+                destination_branch: "main".to_string(),
+                created_on: "2026-06-01T10:00:00.000Z".to_string(),
+                updated_on: "2026-06-02T10:00:00.000Z".to_string(),
+                additions: 42,
+                deletions: 8,
+                files_changed: 3,
+                diffstat_cached: true,
+                risk: ClosedPrRiskSummary {
+                    has_ai_review: true,
+                    impact: "medium".to_string(),
+                    total_findings: 1,
+                    high_or_critical_findings: 0,
+                    severity_counts: vec![ClosedPrCount {
+                        key: "medium".to_string(),
+                        count: 1,
+                    }],
+                    category_counts: vec![ClosedPrCount {
+                        key: "test".to_string(),
+                        count: 1,
+                    }],
+                },
+                synced_at: "1000".to_string(),
+            };
+
+            upsert_closed_pr_metric(&metric).expect("upsert metric");
+            let metrics = list_closed_pr_metrics().expect("list metrics");
+
+            assert_eq!(metrics.len(), 1);
+            assert_eq!(metrics[0], metric);
+        });
+    }
+
+    #[test]
+    fn derives_closed_pr_risk_summary_from_latest_review_run() {
+        with_test_data_dir("closed-pr-risk", |_| {
+            save_review_json(
+                "workspace",
+                "repo",
+                9,
+                r#"{
+                  "threads": [{ "id": "thread-1" }],
+                  "reviewRuns": [{
+                    "id": "run-1",
+                    "findings": [{
+                      "severity": "low",
+                      "category": "docs"
+                    }]
+                  }, {
+                    "id": "run-2",
+                    "findings": [{
+                      "severity": "critical",
+                      "category": "security"
+                    }, {
+                      "severity": "medium",
+                      "category": "test"
+                    }]
+                  }]
+                }"#,
+            )
+            .expect("save review json");
+
+            let risk = review_risk_summary("workspace", "repo", 9, 10, 4, 2);
+
+            assert!(risk.has_ai_review);
+            assert_eq!(risk.impact, "high");
+            assert_eq!(risk.total_findings, 2);
+            assert_eq!(risk.high_or_critical_findings, 1);
+            assert_eq!(
+                risk.severity_counts,
+                vec![
+                    ClosedPrCount {
+                        key: "critical".to_string(),
+                        count: 1,
+                    },
+                    ClosedPrCount {
+                        key: "medium".to_string(),
+                        count: 1,
+                    },
+                ]
+            );
+            assert_eq!(
+                risk.category_counts,
+                vec![
+                    ClosedPrCount {
+                        key: "security".to_string(),
+                        count: 1,
+                    },
+                    ClosedPrCount {
+                        key: "test".to_string(),
+                        count: 1,
+                    },
+                ]
+            );
         });
     }
 }
