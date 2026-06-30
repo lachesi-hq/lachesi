@@ -582,6 +582,7 @@ pub fn save_config(
     codex_model: Option<String>,
     codex_effort: Option<String>,
     jira_base_url: Option<String>,
+    automatic_sync_interval_seconds: Option<u64>,
     menu_bar_sync_enabled: bool,
     notifications_enabled: bool,
 ) -> Result<(), String> {
@@ -596,6 +597,7 @@ pub fn save_config(
         codex_model,
         codex_effort,
         jira_base_url,
+        automatic_sync_interval_seconds,
         menu_bar_sync_enabled,
         notifications_enabled,
         configured: false,

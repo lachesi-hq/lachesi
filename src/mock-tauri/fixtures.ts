@@ -24,6 +24,7 @@ export const mockConfig: AppConfig = {
   codexModel: null,
   codexEffort: null,
   jiraBaseUrl: "https://example.atlassian.net",
+  automaticSyncIntervalSeconds: null,
   menuBarSyncEnabled: true,
   notificationsEnabled: false,
   configured: true,

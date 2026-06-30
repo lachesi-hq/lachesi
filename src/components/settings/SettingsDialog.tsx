@@ -19,10 +19,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AUTOMATIC_SYNC_INTERVAL_OPTIONS } from "@/hooks/useAutomaticSyncPolling";
 import type { ConnectionUser } from "@/hooks/useCredentials";
 import { cn } from "@/lib/utils";
 import type {
   AiProvider,
+  AutomaticSyncIntervalSeconds,
   ClaudeReviewEffort,
   ClaudeReviewModel,
   CodexReviewEffort,
@@ -52,6 +54,7 @@ export interface SettingsSaveInput {
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
   jiraBaseUrl: string | null;
+  automaticSyncIntervalSeconds: AutomaticSyncIntervalSeconds | null;
   menuBarSyncEnabled: boolean;
   notificationsEnabled: boolean;
   username: string;
@@ -71,6 +74,7 @@ export interface SettingsFormProps {
   codexEffort: CodexReviewEffort | null;
   reviewTerminalOptions: ReviewTerminalOption[];
   jiraBaseUrl: string | null;
+  automaticSyncIntervalSeconds: AutomaticSyncIntervalSeconds | null;
   menuBarSyncEnabled: boolean;
   notificationsEnabled: boolean;
   hasCredentials: boolean;
@@ -103,6 +107,7 @@ function SettingsForm({
   codexEffort: initialCodexEffort,
   reviewTerminalOptions,
   jiraBaseUrl: initialJiraBaseUrl,
+  automaticSyncIntervalSeconds: initialAutomaticSyncIntervalSeconds,
   menuBarSyncEnabled: initialMenuBarSyncEnabled,
   notificationsEnabled: initialNotificationsEnabled,
   hasCredentials,
@@ -129,6 +134,8 @@ function SettingsForm({
   const [codexModel, setCodexModel] = useState(initialCodexModel ?? "");
   const [codexEffort, setCodexEffort] = useState<CodexReviewEffort | null>(initialCodexEffort);
   const [jiraBaseUrl, setJiraBaseUrl] = useState(initialJiraBaseUrl ?? "");
+  const [automaticSyncIntervalSeconds, setAutomaticSyncIntervalSeconds] =
+    useState<AutomaticSyncIntervalSeconds | null>(initialAutomaticSyncIntervalSeconds);
   const [menuBarSyncEnabled, setMenuBarSyncEnabled] = useState(initialMenuBarSyncEnabled);
   const [notificationsEnabled, setNotificationsEnabled] = useState(initialNotificationsEnabled);
   const [jiraToken, setJiraToken] = useState("");
@@ -177,6 +184,7 @@ function SettingsForm({
         codexModel: codexModel.trim() || null,
         codexEffort,
         jiraBaseUrl: jiraBaseUrl.trim() || null,
+        automaticSyncIntervalSeconds,
         menuBarSyncEnabled,
         notificationsEnabled,
         username: username.trim(),
@@ -419,6 +427,27 @@ function SettingsForm({
       </div>
 
       <div className="grid gap-2 rounded-md border border-border p-3">
+        <div className="grid gap-1.5 md:max-w-xs">
+          <Label htmlFor="settings-automatic-sync">Automatic sync</Label>
+          <select
+            id="settings-automatic-sync"
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+            value={automaticSyncIntervalSeconds ?? ""}
+            onChange={(event) => {
+              const value = event.target.value;
+              setAutomaticSyncIntervalSeconds(
+                value === "" ? null : (Number(value) as AutomaticSyncIntervalSeconds),
+              );
+            }}
+          >
+            {AUTOMATIC_SYNC_INTERVAL_OPTIONS.map((option) => (
+              <option key={option.value ?? "off"} value={option.value ?? ""}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <Label>Menu bar</Label>
         <label className="flex items-start gap-2 text-sm">
           <input
@@ -560,6 +589,7 @@ export function SettingsPage({ onBack, ...props }: SettingsPageProps) {
     props.codexModel ?? "",
     props.codexEffort ?? "",
     props.jiraBaseUrl ?? "",
+    props.automaticSyncIntervalSeconds ?? "sync-off",
     props.menuBarSyncEnabled ? "menu-on" : "menu-off",
     props.notificationsEnabled ? "notifications-on" : "notifications-off",
   ].join("::");

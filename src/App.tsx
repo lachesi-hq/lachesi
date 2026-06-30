@@ -14,6 +14,7 @@ import { SettingsPage, type SettingsSaveInput } from "@/components/settings/Sett
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAiReview } from "@/hooks/useAiReview";
 import { useAiReviewFix } from "@/hooks/useAiReviewFix";
+import { useAutomaticSyncPolling } from "@/hooks/useAutomaticSyncPolling";
 import { useConfig } from "@/hooks/useConfig";
 import { useCredentials } from "@/hooks/useCredentials";
 import { authorKey, useCurrentUser } from "@/hooks/useCurrentUser";
@@ -85,6 +86,7 @@ export default function App() {
   const pendingReviewThreadIdRef = useRef<string | null>(null);
 
   const repos = config?.repos ?? EMPTY_REPOS;
+  const reposKey = repos.map(repoKey).join("|");
   const { groups, loading, refresh, loadMore } = usePullRequests(repos, filter);
   const currentUser = useCurrentUser(repos.length > 0);
   const activeSel = selection.kind === "pr" ? selection : null;
@@ -272,6 +274,15 @@ export default function App() {
     onOpenPr: selectPullRequest,
     onReviewPr: runBackgroundMenuReview,
     reviewingPrKey: backgroundReviewPrKey,
+  });
+
+  useAutomaticSyncPolling({
+    enabled: repos.length > 0,
+    intervalSeconds: config?.automaticSyncIntervalSeconds ?? null,
+    contextKey: `${reposKey}:${filter}:${
+      activeSel ? `${activeSel.workspace}/${activeSel.repo}#${activeSel.prId}` : "no-active-pr"
+    }`,
+    onSync: refresh,
   });
 
   const recordFindingPublicationEvents = async (
@@ -963,6 +974,7 @@ export default function App() {
     codexModel,
     codexEffort,
     jiraBaseUrl,
+    automaticSyncIntervalSeconds,
     menuBarSyncEnabled,
     notificationsEnabled,
     username,
@@ -986,6 +998,7 @@ export default function App() {
       codexModel,
       codexEffort,
       jiraBaseUrl,
+      automaticSyncIntervalSeconds,
       menuBarSyncEnabled,
       notificationsEnabled,
     });
@@ -1105,6 +1118,7 @@ export default function App() {
               codexEffort={config?.codexEffort ?? null}
               reviewTerminalOptions={reviewTerminalOptions}
               jiraBaseUrl={config?.jiraBaseUrl ?? null}
+              automaticSyncIntervalSeconds={config?.automaticSyncIntervalSeconds ?? null}
               menuBarSyncEnabled={config?.menuBarSyncEnabled ?? true}
               notificationsEnabled={config?.notificationsEnabled ?? false}
               hasCredentials={config?.hasCredentials ?? false}
