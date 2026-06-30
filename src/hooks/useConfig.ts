@@ -3,6 +3,7 @@ import { tauriCall } from "@/lib/tauri";
 import type {
   AiProvider,
   AppConfig,
+  AutomaticSyncIntervalSeconds,
   ClaudeReviewEffort,
   ClaudeReviewModel,
   CodexReviewEffort,
@@ -22,6 +23,7 @@ export type SaveConfigInput = {
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
   jiraBaseUrl: string | null;
+  automaticSyncIntervalSeconds: AutomaticSyncIntervalSeconds | null;
   menuBarSyncEnabled: boolean;
   notificationsEnabled: boolean;
 };

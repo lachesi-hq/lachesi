@@ -42,6 +42,7 @@ const meta = {
     codexEffort: null,
     reviewTerminalOptions: REVIEW_TERMINAL_OPTIONS,
     jiraBaseUrl: "https://example.atlassian.net",
+    automaticSyncIntervalSeconds: null,
     menuBarSyncEnabled: true,
     notificationsEnabled: false,
     hasCredentials: false,
@@ -83,6 +84,7 @@ function Harness({
         codexEffort={null}
         reviewTerminalOptions={REVIEW_TERMINAL_OPTIONS}
         jiraBaseUrl="https://example.atlassian.net"
+        automaticSyncIntervalSeconds={null}
         menuBarSyncEnabled={true}
         notificationsEnabled={false}
         hasCredentials={hasCredentials}

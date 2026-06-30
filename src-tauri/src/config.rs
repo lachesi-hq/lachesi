@@ -58,6 +58,9 @@ pub struct AppConfig {
     /// Jira site base URL for issue links, e.g. https://example.atlassian.net
     #[serde(default)]
     pub jira_base_url: Option<String>,
+    /// Automatic pull request sync interval in seconds. None disables polling.
+    #[serde(default)]
+    pub automatic_sync_interval_seconds: Option<u64>,
     #[serde(default = "default_true")]
     pub menu_bar_sync_enabled: bool,
     #[serde(default)]
@@ -92,6 +95,7 @@ impl Default for AppConfig {
             codex_model: None,
             codex_effort: None,
             jira_base_url: None,
+            automatic_sync_interval_seconds: None,
             menu_bar_sync_enabled: true,
             notifications_enabled: false,
             configured: false,
@@ -175,5 +179,19 @@ mod tests {
         assert_eq!(parsed.ai_provider, AiProvider::Codex);
         assert_eq!(parsed.codex_model.as_deref(), Some("gpt-5-codex"));
         assert_eq!(parsed.codex_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn serializes_optional_automatic_sync_interval() {
+        let config = AppConfig {
+            automatic_sync_interval_seconds: Some(300),
+            ..AppConfig::default()
+        };
+
+        let json = serde_json::to_string(&config).expect("config should serialize");
+        assert!(json.contains(r#""automaticSyncIntervalSeconds":300"#));
+
+        let parsed: AppConfig = serde_json::from_str(&json).expect("config should deserialize");
+        assert_eq!(parsed.automatic_sync_interval_seconds, Some(300));
     }
 }

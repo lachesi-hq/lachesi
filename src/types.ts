@@ -460,6 +460,7 @@ export type AiProvider = "claude" | "codex";
 export type ClaudeReviewModel = "sonnet" | "opus" | "fable";
 export type ClaudeReviewEffort = "low" | "medium" | "high" | "xhigh" | "max";
 export type CodexReviewEffort = "low" | "medium" | "high";
+export type AutomaticSyncIntervalSeconds = 30 | 60 | 300 | 600;
 
 export interface ReviewTerminalOption {
   id: ReviewTerminal;
@@ -478,6 +479,7 @@ export interface AppConfig {
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
   jiraBaseUrl: string | null;
+  automaticSyncIntervalSeconds: AutomaticSyncIntervalSeconds | null;
   menuBarSyncEnabled: boolean;
   notificationsEnabled: boolean;
   configured: boolean;
