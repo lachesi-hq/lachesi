@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { type AppPaneId, BottomPaneBar } from "@/components/BottomPaneBar";
-import { ClosedPrAnalyticsPanel } from "@/components/overview/ClosedPrAnalyticsPanel";
 import { OverviewPanel } from "@/components/overview/OverviewPanel";
 import { PrDetailPanel } from "@/components/pr-detail/PrDetailPanel";
 import type { AuthorOption } from "@/components/pr-sidebar/AuthorFilter";
@@ -58,6 +57,12 @@ import type {
   ReviewFindingPublicationEvent,
 } from "@/types";
 import { repoKey } from "@/types";
+
+const ClosedPrAnalyticsPanel = lazy(() =>
+  import("@/components/overview/ClosedPrAnalyticsPanel").then((module) => ({
+    default: module.ClosedPrAnalyticsPanel,
+  })),
+);
 
 const EMPTY_REPOS: RepoRef[] = [];
 
@@ -1123,16 +1128,24 @@ export default function App() {
               currentUser={currentUser}
             />
           ) : isClosedAnalytics ? (
-            <ClosedPrAnalyticsPanel
-              metrics={closedPrAnalytics.metrics}
-              loading={closedPrAnalytics.loading}
-              syncing={closedPrAnalytics.syncing}
-              error={closedPrAnalytics.error}
-              lastSyncedCount={closedPrAnalytics.lastSyncedCount}
-              onSync={closedPrAnalytics.sync}
-              onBack={() => setSelection({ kind: "pr-list" })}
-              onSelectPr={(pr) => selectPullRequest(pr)}
-            />
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Loading analytics...
+                </div>
+              }
+            >
+              <ClosedPrAnalyticsPanel
+                metrics={closedPrAnalytics.metrics}
+                loading={closedPrAnalytics.loading}
+                syncing={closedPrAnalytics.syncing}
+                error={closedPrAnalytics.error}
+                lastSync={closedPrAnalytics.lastSync}
+                onSync={closedPrAnalytics.sync}
+                onBack={() => setSelection({ kind: "pr-list" })}
+                onSelectPr={(pr) => selectPullRequest(pr)}
+              />
+            </Suspense>
           ) : selection.kind === "settings" ? (
             <SettingsPage
               repos={repos}

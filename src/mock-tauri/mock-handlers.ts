@@ -777,10 +777,19 @@ export const mockHandlers: Record<string, Handler> = {
   },
 
   list_closed_pr_metrics: () => ({ metrics: mockClosedPrMetrics, syncedCount: 0 }),
-  sync_closed_pr_metrics: () => ({
-    metrics: mockClosedPrMetrics,
-    syncedCount: mockClosedPrMetrics.length,
-  }),
+  sync_closed_pr_metrics: (args) => {
+    const updatedAfter = String(
+      (args?.options as { updatedAfter?: string } | undefined)?.updatedAfter ?? "",
+    );
+    const since = updatedAfter ? new Date(updatedAfter).getTime() : Number.NEGATIVE_INFINITY;
+    const metrics = Number.isFinite(since)
+      ? mockClosedPrMetrics.filter((metric) => new Date(metric.updatedOn).getTime() >= since)
+      : mockClosedPrMetrics;
+    return {
+      metrics,
+      syncedCount: metrics.length,
+    };
+  },
 
   get_pull_request: () => mockPullRequestDetailState,
   approve_pull_request: () => {

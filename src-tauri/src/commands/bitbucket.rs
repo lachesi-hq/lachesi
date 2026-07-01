@@ -438,12 +438,14 @@ pub struct ListPrOptions {
     page: Option<u32>,
     pagelen: Option<u32>,
     query: Option<String>,
+    updated_after: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ClosedPrAnalyticsOptions {
     limit_per_state: Option<u32>,
+    updated_after: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -570,6 +572,32 @@ fn now_ms() -> String {
         .unwrap_or_else(|_| "0".to_string())
 }
 
+fn query_literal(value: &str) -> String {
+    value.replace(['\\', '"'], "")
+}
+
+fn pr_query_filter(opts: &ListPrOptions) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(q) = opts.query.as_ref().filter(|q| !q.is_empty()) {
+        parts.push(format!("title ~ \"{}\"", query_literal(q)));
+    }
+    if let Some(updated_after) = opts
+        .updated_after
+        .as_ref()
+        .filter(|value| !value.is_empty())
+    {
+        parts.push(format!(
+            "updated_on >= \"{}\"",
+            query_literal(updated_after)
+        ));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" AND "))
+    }
+}
+
 fn fetch_pull_requests_page(
     client: &BitbucketClient,
     workspace: &str,
@@ -596,8 +624,8 @@ fn fetch_pull_requests_page(
         Some(s) => query.push(("state".into(), s.to_string())),
         None => query.push(("state".into(), "OPEN".into())),
     }
-    if let Some(q) = opts.query.as_ref().filter(|q| !q.is_empty()) {
-        query.push(("q".into(), format!("title ~ \"{}\"", q.replace('"', ""))));
+    if let Some(filter) = pr_query_filter(opts) {
+        query.push(("q".into(), filter));
     }
     let bb: BbPrPage = get_json(client.get(&url).query(&query))?;
     Ok(PullRequestPage {
@@ -823,6 +851,7 @@ pub async fn sync_closed_pr_metrics(
                         page: Some(1),
                         pagelen: Some(limit),
                         query: None,
+                        updated_after: options.updated_after.clone(),
                     },
                 )?;
 
@@ -1099,4 +1128,44 @@ pub async fn delete_comment(
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pr_query_filter_combines_title_and_updated_window() {
+        let opts = ListPrOptions {
+            state: Some("MERGED".to_string()),
+            page: Some(1),
+            pagelen: Some(10),
+            query: Some("payment".to_string()),
+            updated_after: Some("2026-06-01T00:00:00.000Z".to_string()),
+        };
+
+        assert_eq!(
+            pr_query_filter(&opts),
+            Some("title ~ \"payment\" AND updated_on >= \"2026-06-01T00:00:00.000Z\"".to_string(),),
+        );
+    }
+
+    #[test]
+    fn pr_query_filter_sanitizes_literals() {
+        let opts = ListPrOptions {
+            state: None,
+            page: None,
+            pagelen: None,
+            query: Some("quote\" slash\\".to_string()),
+            updated_after: Some("2026-06-01T00:00:00.000Z\"".to_string()),
+        };
+
+        assert_eq!(
+            pr_query_filter(&opts),
+            Some(
+                "title ~ \"quote slash\" AND updated_on >= \"2026-06-01T00:00:00.000Z\""
+                    .to_string(),
+            ),
+        );
+    }
 }
