@@ -435,6 +435,27 @@ export default function App() {
     );
   })();
 
+  const closedAnalyticsAuthors: AuthorOption[] = useMemo(() => {
+    const map = new Map<string, AuthorOption>();
+    for (const metric of closedPrAnalytics.metrics) {
+      if (repositoryFilter != null && repoKey(metric) !== repositoryFilter) continue;
+      const key = authorKey(metric.authorAccountId, metric.authorDisplayName);
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          label: metric.authorDisplayName || "Unknown",
+          isMe: meKey != null && key === meKey,
+        });
+      }
+    }
+    if (meKey && currentUser && !map.has(meKey)) {
+      map.set(meKey, { key: meKey, label: currentUser.displayName, isMe: true });
+    }
+    return [...map.values()].sort((a, b) =>
+      a.isMe ? -1 : b.isMe ? 1 : a.label.localeCompare(b.label),
+    );
+  }, [closedPrAnalytics.metrics, currentUser, meKey, repositoryFilter]);
+
   const repositories = groups.map((group) => ({
     key: repoKey(group.repo),
     label: `${group.repo.workspace}/${group.repo.repo}`,
@@ -528,6 +549,7 @@ export default function App() {
 
   const isOverview = selection.kind === "overview";
   const isClosedAnalytics = selection.kind === "closed-analytics";
+  const sidebarAuthors = isClosedAnalytics ? closedAnalyticsAuthors : authors;
   const openPaneCount = [
     sidebarOpen,
     repositoriesPanelOpen,
@@ -1095,7 +1117,7 @@ export default function App() {
                   ? { workspace: activeSel.workspace, repo: activeSel.repo, prId: activeSel.prId }
                   : null
               }
-              authors={authors}
+              authors={sidebarAuthors}
               authorFilter={authorFilter}
               repositories={repositories}
               repositoryFilter={repositoryFilter}
