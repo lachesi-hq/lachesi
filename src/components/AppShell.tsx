@@ -35,19 +35,20 @@ export function AppShell({
   const hasMain = main != null;
   const hasRight = rightPanel != null;
   const showRightInGrid = hasRight && !rightPanelExpanded;
+  const sidebarColumn = `min(${sidebarWidth}px, 38vw)`;
 
   const columns = (() => {
     if (hasSidebar && hasMain && showRightInGrid) {
-      return `${sidebarWidth}px minmax(0, 1fr) ${rightPanelWidth}px`;
+      return `${sidebarColumn} minmax(0, 1fr) ${rightPanelWidth}px`;
     }
     if (hasSidebar && hasMain) {
-      return `${sidebarWidth}px minmax(0, 1fr)`;
+      return `${sidebarColumn} minmax(0, 1fr)`;
     }
     if (hasMain && showRightInGrid) {
       return `minmax(0, 1fr) ${rightPanelWidth}px`;
     }
     if (hasSidebar && showRightInGrid) {
-      return `${sidebarWidth}px minmax(0, 1fr)`;
+      return `${sidebarColumn} minmax(0, 1fr)`;
     }
     return "minmax(0, 1fr)";
   })();
