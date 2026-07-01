@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowsClockwise, ChartLineUp } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowsClockwise, ChartLineUp, MagnifyingGlass, X } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import {
   Bar,
@@ -14,11 +14,14 @@ import {
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { authorKey } from "@/hooks/useCurrentUser";
 import type {
   ClosedPrAnalyticsSyncOptions,
   ClosedPrAnalyticsSyncResult,
   ClosedPrMetric,
 } from "@/types";
+import { repoKey } from "@/types";
 
 interface ClosedPrAnalyticsPanelProps {
   metrics: ClosedPrMetric[];
@@ -26,6 +29,8 @@ interface ClosedPrAnalyticsPanelProps {
   syncing: boolean;
   error: string | null;
   lastSync: ClosedPrAnalyticsSyncResult | null;
+  repositoryFilter: string | null;
+  authorFilter: string | null;
   onBack: () => void;
   onSync: (options: ClosedPrAnalyticsSyncOptions) => void;
   onSelectPr: (pr: { workspace: string; repo: string; id: number }) => void;
@@ -53,6 +58,7 @@ const SYNC_WINDOWS = [14, 30, 90] as const;
 const DEFAULT_SYNC_DAYS_BACK = 30;
 const SYNC_LIMIT_PER_STATE = 10;
 const NUMBER_FORMATTER = new Intl.NumberFormat();
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function churn(metric: ClosedPrMetric): number {
   return metric.additions + metric.deletions;
@@ -73,6 +79,16 @@ function formatDays(days: number): string {
 
 function formatNumber(value: number): string {
   return NUMBER_FORMATTER.format(Math.round(value));
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function weekKey(date: string): string {
@@ -173,17 +189,49 @@ function topCounts(map: Map<string, number>, limit: number): CountDatum[] {
     .map(([label, count]) => ({ label, count }));
 }
 
+function matchesPrQuery(metric: ClosedPrMetric, query: string): boolean {
+  if (!query) return true;
+  return [
+    metric.title,
+    String(metric.prId),
+    metric.authorDisplayName,
+    metric.repo,
+    metric.workspace,
+    metric.sourceBranch,
+    metric.destinationBranch,
+    metric.state,
+  ].some((value) => value.toLowerCase().includes(query));
+}
+
 export function ClosedPrAnalyticsPanel({
   metrics,
   loading,
   syncing,
   error,
   lastSync,
+  repositoryFilter,
+  authorFilter,
   onBack,
   onSync,
   onSelectPr,
 }: ClosedPrAnalyticsPanelProps) {
   const [syncDaysBack, setSyncDaysBack] = useState<number>(DEFAULT_SYNC_DAYS_BACK);
+  const [prQuery, setPrQuery] = useState("");
+  const filteredMetrics = useMemo(() => {
+    const minUpdatedAt = Date.now() - syncDaysBack * DAY_MS;
+    const query = prQuery.trim().toLowerCase();
+    return metrics.filter((metric) => {
+      const updatedAt = new Date(metric.updatedOn).getTime();
+      const inRange = !Number.isFinite(updatedAt) || updatedAt >= minUpdatedAt;
+      const inRepo =
+        repositoryFilter == null ||
+        repoKey({ workspace: metric.workspace, repo: metric.repo }) === repositoryFilter;
+      const inAuthor =
+        authorFilter == null ||
+        authorKey(metric.authorAccountId, metric.authorDisplayName) === authorFilter;
+      return inRange && inRepo && inAuthor && matchesPrQuery(metric, query);
+    });
+  }, [authorFilter, metrics, prQuery, repositoryFilter, syncDaysBack]);
   const analytics = useMemo(() => {
     const authorCounts = new Map<string, number>();
     const repoCounts = new Map<string, number>();
@@ -196,7 +244,7 @@ export function ClosedPrAnalyticsPanel({
     let withAi = 0;
     let highImpact = 0;
 
-    for (const metric of metrics) {
+    for (const metric of filteredMetrics) {
       addCount(authorCounts, metric.authorDisplayName || "Unknown");
       addCount(repoCounts, metric.repo);
       addCount(repoChurn, metric.repo, churn(metric));
@@ -220,15 +268,16 @@ export function ClosedPrAnalyticsPanel({
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([week, count]) => ({ week, count })),
       totalChurn,
-      avgFiles: metrics.length > 0 ? filesChanged / metrics.length : 0,
-      avgLeadTime: metrics.length > 0 ? leadTime / metrics.length : 0,
+      avgFiles: filteredMetrics.length > 0 ? filesChanged / filteredMetrics.length : 0,
+      avgLeadTime: filteredMetrics.length > 0 ? leadTime / filteredMetrics.length : 0,
       withAi,
       highImpact,
-      largest: [...metrics]
-        .sort((a, b) => churn(b) - churn(a) || b.filesChanged - a.filesChanged)
-        .slice(0, 10),
+      tableRows: [...filteredMetrics].sort(
+        (a, b) =>
+          new Date(b.updatedOn).getTime() - new Date(a.updatedOn).getTime() || churn(b) - churn(a),
+      ),
     };
-  }, [metrics]);
+  }, [filteredMetrics]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -246,7 +295,9 @@ export function ClosedPrAnalyticsPanel({
         <div className="min-w-0 flex-1">
           <span className="text-sm font-semibold">Closed PR analytics</span>
           <span className="ml-2 text-xs text-muted-foreground">
-            {metrics.length} cached PR{metrics.length === 1 ? "" : "s"}
+            {filteredMetrics.length === metrics.length
+              ? `${metrics.length} cached PR${metrics.length === 1 ? "" : "s"}`
+              : `${filteredMetrics.length} of ${metrics.length} cached PRs`}
           </span>
         </div>
         <div className="ml-auto flex w-full items-center justify-end gap-2 sm:w-auto">
@@ -285,6 +336,35 @@ export function ClosedPrAnalyticsPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 shadow-sm sm:flex-row sm:items-center">
+              <div className="relative min-w-0 flex-1">
+                <MagnifyingGlass
+                  size={15}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  type="search"
+                  value={prQuery}
+                  onChange={(event) => setPrQuery(event.target.value)}
+                  placeholder="Filter PR title, ID, branch, author"
+                  aria-label="Filter closed pull requests"
+                  className="pl-9 pr-9"
+                />
+                {prQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setPrQuery("")}
+                    className="absolute right-2 top-1/2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label="Clear closed pull request filter"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="whitespace-nowrap text-xs text-muted-foreground">
+                {filteredMetrics.length} shown
+              </div>
+            </div>
             {error && (
               <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
@@ -305,7 +385,7 @@ export function ClosedPrAnalyticsPanel({
             )}
 
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-              <StatCard label="Closed PRs" value={metrics.length} sub="cached locally" />
+              <StatCard label="Closed PRs" value={filteredMetrics.length} sub="shown locally" />
               <StatCard
                 label="Total churn"
                 value={formatNumber(analytics.totalChurn)}
@@ -313,12 +393,12 @@ export function ClosedPrAnalyticsPanel({
               />
               <StatCard
                 label="Avg files"
-                value={metrics.length > 0 ? analytics.avgFiles.toFixed(1) : "—"}
+                value={filteredMetrics.length > 0 ? analytics.avgFiles.toFixed(1) : "—"}
                 sub="changed per PR"
               />
               <StatCard
                 label="Avg close time"
-                value={metrics.length > 0 ? formatDays(analytics.avgLeadTime) : "—"}
+                value={filteredMetrics.length > 0 ? formatDays(analytics.avgLeadTime) : "—"}
                 sub="created to updated"
               />
               <StatCard
@@ -398,9 +478,15 @@ export function ClosedPrAnalyticsPanel({
             </div>
 
             <div className="flex flex-col gap-2">
-              <div className="text-sm font-semibold">Largest closed PRs</div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold">Closed PRs</div>
+                <div className="text-xs text-muted-foreground">
+                  {analytics.tableRows.length} matching row
+                  {analytics.tableRows.length === 1 ? "" : "s"}
+                </div>
+              </div>
               <div className="overflow-x-auto rounded-lg border border-border">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[1320px] text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/50">
                       <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">
@@ -411,6 +497,12 @@ export function ClosedPrAnalyticsPanel({
                       </th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground">
                         Repo
+                      </th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground">
+                        Opened
+                      </th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground">
+                        Closed
                       </th>
                       <th className="px-3 py-2.5 text-right text-xs font-semibold text-muted-foreground">
                         + / -
@@ -424,14 +516,14 @@ export function ClosedPrAnalyticsPanel({
                     </tr>
                   </thead>
                   <tbody>
-                    {analytics.largest.length === 0 ? (
+                    {analytics.tableRows.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                          No cached closed PRs. Run Sync to collect recent metrics.
+                        <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
+                          No closed PRs match the current filters.
                         </td>
                       </tr>
                     ) : (
-                      analytics.largest.map((metric) => (
+                      analytics.tableRows.map((metric) => (
                         <tr
                           key={`${metric.workspace}/${metric.repo}/${metric.prId}`}
                           className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/40"
@@ -457,6 +549,12 @@ export function ClosedPrAnalyticsPanel({
                           </td>
                           <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">
                             {metric.repo}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">
+                            {formatDate(metric.createdOn)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">
+                            {formatDate(metric.updatedOn)}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">
                             <span className="text-[var(--success)]">+{metric.additions}</span>

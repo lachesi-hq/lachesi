@@ -1085,10 +1085,7 @@ export default function App() {
           ) : undefined
         }
         sidebar={
-          isOverview ||
-          isClosedAnalytics ||
-          selection.kind === "settings" ||
-          !sidebarOpen ? undefined : (
+          isOverview || selection.kind === "settings" || !sidebarOpen ? undefined : (
             <PrSidebar
               groups={displayedGroups}
               filter={filter}
@@ -1141,6 +1138,8 @@ export default function App() {
                 syncing={closedPrAnalytics.syncing}
                 error={closedPrAnalytics.error}
                 lastSync={closedPrAnalytics.lastSync}
+                repositoryFilter={repositoryFilter}
+                authorFilter={authorFilter}
                 onSync={closedPrAnalytics.sync}
                 onBack={() => setSelection({ kind: "pr-list" })}
                 onSelectPr={(pr) => selectPullRequest(pr)}
