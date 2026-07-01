@@ -260,7 +260,7 @@ export function ClosedPrAnalyticsPanel({
     }
 
     return {
-      authorData: topCounts(authorCounts, 8),
+      authorData: topCounts(authorCounts, authorCounts.size),
       repoData: topCounts(repoCounts, 8),
       repoChurnData: topCounts(repoChurn, 8),
       categoryData: topCounts(categoryCounts, 8),
