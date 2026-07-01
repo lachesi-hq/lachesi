@@ -496,6 +496,15 @@ export interface ClosedPrAnalyticsSnapshot {
   syncedCount: number;
 }
 
+export interface ClosedPrAnalyticsSyncOptions {
+  daysBack: number;
+  limitPerState: number;
+}
+
+export interface ClosedPrAnalyticsSyncResult extends ClosedPrAnalyticsSyncOptions {
+  syncedCount: number;
+}
+
 export type DiffViewMode = "unified" | "split" | "conversation";
 export type ReviewTerminal = "wezterm" | "iterm" | "terminal";
 export type AiProvider = "claude" | "codex";

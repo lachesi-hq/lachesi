@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowsClockwise, ChartLineUp } from "@phosphor-icons/react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -14,16 +14,20 @@ import {
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { ClosedPrMetric } from "@/types";
+import type {
+  ClosedPrAnalyticsSyncOptions,
+  ClosedPrAnalyticsSyncResult,
+  ClosedPrMetric,
+} from "@/types";
 
 interface ClosedPrAnalyticsPanelProps {
   metrics: ClosedPrMetric[];
   loading: boolean;
   syncing: boolean;
   error: string | null;
-  lastSyncedCount: number;
+  lastSync: ClosedPrAnalyticsSyncResult | null;
   onBack: () => void;
-  onSync: () => void;
+  onSync: (options: ClosedPrAnalyticsSyncOptions) => void;
   onSelectPr: (pr: { workspace: string; repo: string; id: number }) => void;
 }
 
@@ -45,6 +49,10 @@ const COLORS = [
   "hsl(27 87% 54%)",
   "var(--destructive)",
 ];
+const SYNC_WINDOWS = [14, 30, 90] as const;
+const DEFAULT_SYNC_DAYS_BACK = 30;
+const SYNC_LIMIT_PER_STATE = 10;
+const NUMBER_FORMATTER = new Intl.NumberFormat();
 
 function churn(metric: ClosedPrMetric): number {
   return metric.additions + metric.deletions;
@@ -64,7 +72,7 @@ function formatDays(days: number): string {
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat().format(Math.round(value));
+  return NUMBER_FORMATTER.format(Math.round(value));
 }
 
 function weekKey(date: string): string {
@@ -170,11 +178,12 @@ export function ClosedPrAnalyticsPanel({
   loading,
   syncing,
   error,
-  lastSyncedCount,
+  lastSync,
   onBack,
   onSync,
   onSelectPr,
 }: ClosedPrAnalyticsPanelProps) {
+  const [syncDaysBack, setSyncDaysBack] = useState<number>(DEFAULT_SYNC_DAYS_BACK);
   const analytics = useMemo(() => {
     const authorCounts = new Map<string, number>();
     const repoCounts = new Map<string, number>();
@@ -223,7 +232,7 @@ export function ClosedPrAnalyticsPanel({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
         <Button
           variant="ghost"
           size="sm"
@@ -240,10 +249,33 @@ export function ClosedPrAnalyticsPanel({
             {metrics.length} cached PR{metrics.length === 1 ? "" : "s"}
           </span>
         </div>
-        <Button variant="secondary" size="sm" onClick={onSync} disabled={syncing}>
-          <ArrowsClockwise size={14} className={syncing ? "animate-spin" : undefined} />
-          Sync
-        </Button>
+        <div className="ml-auto flex w-full items-center justify-end gap-2 sm:w-auto">
+          <div className="flex items-center gap-1 rounded-md border border-border bg-muted/50 p-0.5">
+            {SYNC_WINDOWS.map((days) => (
+              <Button
+                key={days}
+                type="button"
+                variant={syncDaysBack === days ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2"
+                disabled={syncing}
+                onClick={() => setSyncDaysBack(days)}
+                aria-pressed={syncDaysBack === days}
+              >
+                {days}d
+              </Button>
+            ))}
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => onSync({ daysBack: syncDaysBack, limitPerState: SYNC_LIMIT_PER_STATE })}
+            disabled={syncing}
+          >
+            <ArrowsClockwise size={14} className={syncing ? "animate-spin" : undefined} />
+            {syncing ? "Syncing" : "Sync"}
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -258,9 +290,17 @@ export function ClosedPrAnalyticsPanel({
                 {error}
               </div>
             )}
-            {lastSyncedCount > 0 && (
+            {syncing && (
               <div className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
-                Synced {lastSyncedCount} recent closed PR metrics into the local cache.
+                Syncing closed PRs updated in the last {syncDaysBack} days, up to{" "}
+                {SYNC_LIMIT_PER_STATE} PRs per state per repo.
+              </div>
+            )}
+            {lastSync && !syncing && (
+              <div className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+                {lastSync.syncedCount > 0
+                  ? `Synced ${lastSync.syncedCount} closed PR metrics from the last ${lastSync.daysBack} days.`
+                  : `No closed PRs found in the last ${lastSync.daysBack} days.`}
               </div>
             )}
 
