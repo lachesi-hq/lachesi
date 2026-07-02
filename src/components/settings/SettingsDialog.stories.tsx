@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import type { RepoRef, ReviewTerminalOption } from "@/types";
+import type { RepoRef, ReviewProvider, ReviewTerminalOption } from "@/types";
 import { SettingsDialog } from "./SettingsDialog";
 
 const REVIEW_TERMINAL_OPTIONS: ReviewTerminalOption[] = [
@@ -10,7 +10,7 @@ const REVIEW_TERMINAL_OPTIONS: ReviewTerminalOption[] = [
   { id: "terminal", label: "Terminal", available: true },
 ];
 
-const okConnection = async (_u: string, _t: string) => {
+const okConnection = async (_provider: ReviewProvider, _u: string, _t: string) => {
   await new Promise((r) => setTimeout(r, 400));
   return { displayName: "Alex Reviewer" };
 };
@@ -21,8 +21,9 @@ const failConnection = async () => {
 };
 
 const SAMPLE_REPOS: RepoRef[] = [
-  { workspace: "example-workspace", repo: "frontend-app" },
-  { workspace: "example-workspace", repo: "backend-api" },
+  { provider: "bitbucket", workspace: "example-workspace", repo: "frontend-app" },
+  { provider: "bitbucket", workspace: "example-workspace", repo: "backend-api" },
+  { provider: "github", workspace: "lachesi-hq", repo: "lachesi" },
 ];
 
 const meta = {
@@ -33,6 +34,7 @@ const meta = {
     open: true,
     onOpenChange: () => {},
     repos: SAMPLE_REPOS,
+    reviewProvider: "bitbucket",
     defaultDiffView: "unified",
     reviewTerminal: "wezterm",
     aiProvider: "claude",
@@ -46,6 +48,7 @@ const meta = {
     menuBarSyncEnabled: true,
     notificationsEnabled: false,
     hasCredentials: false,
+    hasGithubCredentials: false,
     hasJira: false,
     hasNotion: false,
     onTestConnection: okConnection,
@@ -63,7 +66,11 @@ function Harness({
   repos,
   hasCredentials,
 }: {
-  testConnection: (u: string, t: string) => Promise<{ displayName: string }>;
+  testConnection: (
+    provider: ReviewProvider,
+    u: string,
+    t: string,
+  ) => Promise<{ displayName: string }>;
   repos: RepoRef[];
   hasCredentials: boolean;
 }) {
@@ -75,6 +82,7 @@ function Harness({
         open={open}
         onOpenChange={setOpen}
         repos={repos}
+        reviewProvider="bitbucket"
         defaultDiffView="unified"
         reviewTerminal={null}
         aiProvider="claude"
@@ -88,6 +96,7 @@ function Harness({
         menuBarSyncEnabled={true}
         notificationsEnabled={false}
         hasCredentials={hasCredentials}
+        hasGithubCredentials={false}
         hasJira={false}
         hasNotion={false}
         onTestConnection={testConnection}

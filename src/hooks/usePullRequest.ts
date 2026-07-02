@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { tauriCall } from "@/lib/tauri";
-import type { PullRequestDetail } from "@/types";
+import type { PullRequestDetail, ReviewProvider } from "@/types";
 
 interface UsePullRequestResult {
   pr: PullRequestDetail | null;
@@ -11,6 +11,7 @@ interface UsePullRequestResult {
 
 /** Loads a single pull request's detail (header info) via IPC. */
 export function usePullRequest(
+  provider: ReviewProvider | null,
   workspace: string | null,
   repo: string | null,
   prId: number | null,
@@ -29,6 +30,7 @@ export function usePullRequest(
     setError(null);
     try {
       const detail = await tauriCall<PullRequestDetail>("get_pull_request", {
+        provider,
         workspace,
         repo,
         id: prId,
@@ -41,7 +43,7 @@ export function usePullRequest(
     } finally {
       setLoading(false);
     }
-  }, [workspace, repo, prId]);
+  }, [provider, workspace, repo, prId]);
 
   useEffect(() => {
     if (prId == null || !workspace || !repo) {
@@ -52,7 +54,7 @@ export function usePullRequest(
     let cancelled = false;
     setLoading(true);
     setError(null);
-    tauriCall<PullRequestDetail>("get_pull_request", { workspace, repo, id: prId })
+    tauriCall<PullRequestDetail>("get_pull_request", { provider, workspace, repo, id: prId })
       .then((detail) => {
         if (!cancelled) setPr(detail);
       })
@@ -65,7 +67,7 @@ export function usePullRequest(
     return () => {
       cancelled = true;
     };
-  }, [workspace, repo, prId]);
+  }, [provider, workspace, repo, prId]);
 
   return { pr, loading, error, refresh };
 }

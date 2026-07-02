@@ -10,12 +10,15 @@ import type {
 export const mockConfig: AppConfig = {
   repos: [
     {
+      provider: "bitbucket",
       workspace: "example-workspace",
       repo: "frontend-app",
       localPath: "/Users/alex/dev/example/frontend-app",
     },
-    { workspace: "example-workspace", repo: "backend-api", localPath: null },
+    { provider: "bitbucket", workspace: "example-workspace", repo: "backend-api", localPath: null },
+    { provider: "github", workspace: "lachesi-hq", repo: "lachesi", localPath: null },
   ],
+  reviewProvider: "bitbucket",
   defaultDiffView: "unified",
   theme: "dark",
   reviewTerminal: null,
@@ -30,6 +33,7 @@ export const mockConfig: AppConfig = {
   notificationsEnabled: false,
   configured: true,
   hasCredentials: true,
+  hasGithubCredentials: true,
   hasJira: true,
   hasNotion: true,
 };

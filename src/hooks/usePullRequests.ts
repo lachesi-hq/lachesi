@@ -49,12 +49,17 @@ export function usePullRequests(repos: RepoRef[], filter: PrListFilter): UsePull
     async (repo: RepoRef, page: number) => {
       const backendState = filter === "DRAFT" ? "OPEN" : filter;
       const res = await tauriCall<PullRequestPage>("list_pull_requests", {
+        provider: repo.provider ?? "bitbucket",
         workspace: repo.workspace,
         repo: repo.repo,
         opts: { state: backendState, page, pagelen: PAGELEN },
       });
       const values = filter === "DRAFT" ? res.values.filter((pr) => pr.draft) : res.values;
-      const tagged = values.map((pr) => ({ ...pr, workspace: repo.workspace, repo: repo.repo }));
+      const tagged = values.map((pr) => ({
+        ...pr,
+        workspace: repo.workspace,
+        repo: repo.repo,
+      }));
       return { tagged, hasNext: res.hasNext };
     },
     [filter],

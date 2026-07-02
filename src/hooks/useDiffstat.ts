@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { tauriCall } from "@/lib/tauri";
-import type { DiffstatEntry } from "@/types";
+import type { DiffstatEntry, ReviewProvider } from "@/types";
 
 interface UseDiffstatResult {
   diffstat: DiffstatEntry[];
@@ -10,6 +10,7 @@ interface UseDiffstatResult {
 
 /** Loads the per-file change summary for a PR via IPC. */
 export function useDiffstat(
+  provider: ReviewProvider | null,
   workspace: string | null,
   repo: string | null,
   prId: number | null,
@@ -27,7 +28,7 @@ export function useDiffstat(
     let cancelled = false;
     setLoading(true);
     setError(null);
-    tauriCall<DiffstatEntry[]>("get_diffstat", { workspace, repo, id: prId })
+    tauriCall<DiffstatEntry[]>("get_diffstat", { provider, workspace, repo, id: prId })
       .then((d) => {
         if (!cancelled) setDiffstat(d);
       })
@@ -40,7 +41,7 @@ export function useDiffstat(
     return () => {
       cancelled = true;
     };
-  }, [workspace, repo, prId]);
+  }, [provider, workspace, repo, prId]);
 
   return { diffstat, loading, error };
 }

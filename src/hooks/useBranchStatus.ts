@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { tauriCall } from "@/lib/tauri";
-import type { BranchStatus } from "@/types";
+import type { BranchStatus, ReviewProvider } from "@/types";
 
 /** Loads how far the PR's source branch is behind/ahead of its destination. */
 export function useBranchStatus(
+  provider: ReviewProvider | null,
   workspace: string | null,
   repo: string | null,
   source: string | null,
@@ -25,6 +26,7 @@ export function useBranchStatus(
     setLoading(true);
     try {
       const next = await tauriCall<BranchStatus>("get_branch_status", {
+        provider,
         workspace,
         repo,
         source,
@@ -36,7 +38,7 @@ export function useBranchStatus(
     } finally {
       setLoading(false);
     }
-  }, [workspace, repo, source, destination]);
+  }, [provider, workspace, repo, source, destination]);
 
   useEffect(() => {
     void load();

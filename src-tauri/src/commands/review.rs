@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::config::AiProvider;
+use crate::config::{self, AiProvider, ReviewProvider as ConfigReviewProvider};
 use crate::local_repo::resolve_local_repo;
 use crate::repo_config;
 use crate::review_storage;
@@ -72,6 +72,7 @@ pub struct AiReviewStoreData {
 #[serde(rename_all = "lowercase")]
 pub enum ReviewProvider {
     Bitbucket,
+    Github,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1805,7 +1806,7 @@ fn materialize_review_run(
     Ok(ReviewRun {
         id: run_id.clone(),
         schema_version: REVIEW_SCHEMA_VERSION.to_string(),
-        provider: ReviewProvider::Bitbucket,
+        provider: review_provider_for_repo(workspace, repo),
         workspace: workspace.to_string(),
         repo: repo.to_string(),
         pr_id,
@@ -5963,5 +5964,18 @@ Fix: invalidate the query after the mutation succeeds."#;
                 .and_then(|publication| publication.published_at.as_deref()),
             Some("1750076500000")
         );
+    }
+}
+fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {
+    let cfg = config::load();
+    match cfg
+        .repos
+        .iter()
+        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo)
+        .map(|candidate| candidate.provider)
+        .unwrap_or(cfg.review_provider)
+    {
+        ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
+        ConfigReviewProvider::Github => ReviewProvider::Github,
     }
 }

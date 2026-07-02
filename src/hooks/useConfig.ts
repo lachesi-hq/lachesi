@@ -9,11 +9,13 @@ import type {
   CodexReviewEffort,
   DiffViewMode,
   RepoRef,
+  ReviewProvider,
   ReviewTerminal,
 } from "@/types";
 
 export type SaveConfigInput = {
   repos: RepoRef[];
+  reviewProvider: ReviewProvider;
   defaultDiffView: DiffViewMode;
   theme: "light" | "dark";
   reviewTerminal: ReviewTerminal | null;

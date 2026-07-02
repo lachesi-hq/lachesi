@@ -5,7 +5,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
-use crate::config;
+use crate::config::{self, ReviewProvider};
 use crate::local_repo::{configured_repo_path, find_in_path, git_origin_matches};
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -278,6 +278,7 @@ fn list_branch_options(
 }
 
 fn state_for_repo(
+    provider: ReviewProvider,
     workspace: String,
     repo: String,
     local_path: Option<PathBuf>,
@@ -322,9 +323,12 @@ fn state_for_repo(
             error: Some("Configured local path is not a git repository.".to_string()),
         };
     }
-    if git_origin_matches(&path, &workspace, &repo).ok() != Some(true) {
-        let error =
-            format!("Configured local path does not match bitbucket.org/{workspace}/{repo}.");
+    if git_origin_matches(&path, provider, &workspace, &repo).ok() != Some(true) {
+        let remote = match provider {
+            ReviewProvider::Bitbucket => format!("bitbucket.org/{workspace}/{repo}"),
+            ReviewProvider::Github => format!("github.com/{workspace}/{repo}"),
+        };
+        let error = format!("Configured local path does not match {remote}.");
         return RepositoryWorktreeState {
             workspace,
             repo,
@@ -415,10 +419,12 @@ fn configured_repo(workspace: &str, repo: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("Repository {workspace}/{repo} is not configured."))?;
     let repo_path = configured_repo_path(repo_ref)
         .ok_or_else(|| format!("Repository {workspace}/{repo} has no local path configured."))?;
-    if git_origin_matches(&repo_path, workspace, repo)? != true {
-        return Err(format!(
-            "Configured local path does not match bitbucket.org/{workspace}/{repo}."
-        ));
+    if git_origin_matches(&repo_path, repo_ref.provider, workspace, repo)? != true {
+        let remote = match repo_ref.provider {
+            ReviewProvider::Bitbucket => format!("bitbucket.org/{workspace}/{repo}"),
+            ReviewProvider::Github => format!("github.com/{workspace}/{repo}"),
+        };
+        return Err(format!("Configured local path does not match {remote}."));
     }
     Ok(repo_path)
 }
@@ -670,7 +676,7 @@ pub fn list_repository_worktrees() -> Result<Vec<RepositoryWorktreeState>, Strin
         .into_iter()
         .map(|repo_ref| {
             let path = configured_repo_path(&repo_ref);
-            state_for_repo(repo_ref.workspace, repo_ref.repo, path)
+            state_for_repo(repo_ref.provider, repo_ref.workspace, repo_ref.repo, path)
         })
         .collect())
 }
@@ -853,7 +859,13 @@ pub fn checkout_repository_branch(
 ) -> Result<RepositoryWorktreeState, String> {
     let repo_path = configured_repo(&workspace, &repo)?;
     checkout_branch(&repo_path, &branch_ref)?;
-    Ok(state_for_repo(workspace, repo, Some(repo_path)))
+    let provider = config::load()
+        .repos
+        .iter()
+        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo)
+        .map(|candidate| candidate.provider)
+        .unwrap_or_default();
+    Ok(state_for_repo(provider, workspace, repo, Some(repo_path)))
 }
 
 #[tauri::command]
@@ -863,14 +875,26 @@ pub fn fetch_repository(
 ) -> Result<RepositoryWorktreeState, String> {
     let repo_path = configured_repo(&workspace, &repo)?;
     fetch_repo(&repo_path)?;
-    Ok(state_for_repo(workspace, repo, Some(repo_path)))
+    let provider = config::load()
+        .repos
+        .iter()
+        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo)
+        .map(|candidate| candidate.provider)
+        .unwrap_or_default();
+    Ok(state_for_repo(provider, workspace, repo, Some(repo_path)))
 }
 
 #[tauri::command]
 pub fn pull_repository(workspace: String, repo: String) -> Result<RepositoryWorktreeState, String> {
     let repo_path = configured_repo(&workspace, &repo)?;
     pull_repo(&repo_path)?;
-    Ok(state_for_repo(workspace, repo, Some(repo_path)))
+    let provider = config::load()
+        .repos
+        .iter()
+        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo)
+        .map(|candidate| candidate.provider)
+        .unwrap_or_default();
+    Ok(state_for_repo(provider, workspace, repo, Some(repo_path)))
 }
 
 #[cfg(test)]

@@ -112,6 +112,7 @@ function AppShellHarness() {
         }
         main={
           <PrDetailPanel
+            provider="bitbucket"
             workspace={active?.workspace ?? null}
             repo={active?.repo ?? null}
             prId={active?.prId ?? null}

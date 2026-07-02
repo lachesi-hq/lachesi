@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::Path;
 
-use crate::config::{self, AppConfig, RepoRef};
+use crate::config::{self, AppConfig, RepoRef, ReviewProvider};
 use crate::config::{AiProvider, ReviewTerminal};
 use crate::credentials::{self, Credentials};
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
@@ -26,6 +26,11 @@ fn dry_run() -> bool {
 
 struct BitbucketClient {
     username: String,
+    token: String,
+    http: reqwest::blocking::Client,
+}
+
+struct GithubClient {
     token: String,
     http: reqwest::blocking::Client,
 }
@@ -69,11 +74,79 @@ impl BitbucketClient {
     }
 }
 
+impl GithubClient {
+    fn new(token: String) -> Result<Self, String> {
+        let http = reqwest::blocking::Client::builder()
+            .user_agent("lachesi")
+            .build()
+            .map_err(|e| e.to_string())?;
+        Ok(Self { token, http })
+    }
+
+    fn from_stored() -> Result<Self, String> {
+        let token = credentials::load_github_token()
+            .ok_or_else(|| "No GitHub token configured. Open Settings to add it.".to_string())?;
+        Self::new(token)
+    }
+
+    fn get(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .get(url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+    }
+
+    fn get_diff(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .get(url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github.v3.diff")
+    }
+
+    fn post(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .post(url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+    }
+
+    fn delete(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .delete(url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+    }
+}
+
 fn repo_base(workspace: &str, repo: &str) -> Result<String, String> {
     if workspace.trim().is_empty() || repo.trim().is_empty() {
         return Err("Bitbucket workspace/repo is required.".to_string());
     }
     Ok(format!("{BASE}/repositories/{workspace}/{repo}"))
+}
+
+fn github_repo_base(owner: &str, repo: &str) -> Result<String, String> {
+    if owner.trim().is_empty() || repo.trim().is_empty() {
+        return Err("GitHub owner/repository is required.".to_string());
+    }
+    Ok(format!(
+        "https://api.github.com/repos/{}/{}",
+        encode_path_segment(owner),
+        encode_path_segment(repo)
+    ))
+}
+
+fn encode_path_segment(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        let ch = byte as char;
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~') {
+            out.push(ch);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 fn check(resp: reqwest::blocking::Response) -> Result<reqwest::blocking::Response, String> {
@@ -83,6 +156,15 @@ fn check(resp: reqwest::blocking::Response) -> Result<reqwest::blocking::Respons
     }
     let body = resp.text().unwrap_or_default();
     Err(format!("Bitbucket API error {status}: {body}"))
+}
+
+fn check_github(resp: reqwest::blocking::Response) -> Result<reqwest::blocking::Response, String> {
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(resp);
+    }
+    let body = resp.text().unwrap_or_default();
+    Err(format!("GitHub API error {status}: {body}"))
 }
 
 /// Send a request, retrying on 429 (honoring `Retry-After`) and transient 5xx
@@ -116,6 +198,19 @@ fn send_checked(
 fn get_json<T: DeserializeOwned>(req: reqwest::blocking::RequestBuilder) -> Result<T, String> {
     let resp = send_checked(req)?;
     resp.json::<T>().map_err(|e| e.to_string())
+}
+
+fn github_get_json<T: DeserializeOwned>(
+    req: reqwest::blocking::RequestBuilder,
+) -> Result<T, String> {
+    let resp = check_github(req.send().map_err(|e| e.to_string())?)?;
+    resp.json::<T>().map_err(|e| e.to_string())
+}
+
+fn github_send_checked(
+    req: reqwest::blocking::RequestBuilder,
+) -> Result<reqwest::blocking::Response, String> {
+    check_github(req.send().map_err(|e| e.to_string())?)
 }
 
 #[derive(Deserialize)]
@@ -314,6 +409,110 @@ struct BbUser {
     display_name: String,
     #[serde(default)]
     account_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GhUser {
+    #[serde(default)]
+    login: String,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GhRef {
+    #[serde(default)]
+    #[allow(dead_code)]
+    label: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    r#ref: String,
+    #[serde(default)]
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct GhPullRequest {
+    number: u32,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    draft: bool,
+    user: Option<GhUser>,
+    head: GhRef,
+    base: GhRef,
+    #[serde(default)]
+    comments: Option<u32>,
+    #[serde(default)]
+    review_comments: Option<u32>,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    merged_at: Option<String>,
+    #[serde(default)]
+    requested_reviewers: Vec<GhUser>,
+}
+
+#[derive(Deserialize)]
+struct GhFile {
+    #[serde(default)]
+    filename: String,
+    #[serde(default)]
+    previous_filename: Option<String>,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    additions: u32,
+    #[serde(default)]
+    deletions: u32,
+}
+
+#[derive(Deserialize)]
+struct GhReviewComment {
+    id: u32,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    body_html: Option<String>,
+    user: Option<GhUser>,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    line: Option<u32>,
+    #[serde(default)]
+    original_line: Option<u32>,
+    #[serde(default)]
+    side: Option<String>,
+    #[serde(default)]
+    in_reply_to_id: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct GhIssueComment {
+    id: u32,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    body_html: Option<String>,
+    user: Option<GhUser>,
+    #[serde(default)]
+    created_at: String,
+}
+
+#[derive(Deserialize)]
+struct GhCompare {
+    #[serde(default)]
+    ahead_by: u32,
+    #[serde(default)]
+    behind_by: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -554,6 +753,207 @@ fn map_pr_detail(bb: BbPrDetail) -> PullRequestDetail {
     }
 }
 
+fn provider_for(provider: Option<ReviewProvider>, workspace: &str, repo: &str) -> ReviewProvider {
+    if let Some(provider) = provider {
+        return provider;
+    }
+    let cfg = config::load();
+    cfg.repos
+        .iter()
+        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo)
+        .map(|candidate| candidate.provider)
+        .unwrap_or(cfg.review_provider)
+}
+
+fn gh_user_label(user: Option<GhUser>) -> (String, Option<String>) {
+    match user {
+        Some(user) => {
+            let login = user.login;
+            let label = user
+                .name
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| login.clone());
+            (label, Some(login))
+        }
+        None => (String::new(), None),
+    }
+}
+
+fn gh_state(pr: &GhPullRequest) -> String {
+    if pr.state.eq_ignore_ascii_case("open") {
+        "OPEN".to_string()
+    } else if pr.merged_at.is_some() {
+        "MERGED".to_string()
+    } else {
+        "DECLINED".to_string()
+    }
+}
+
+fn gh_reviewers(users: Vec<GhUser>) -> Vec<Participant> {
+    users
+        .into_iter()
+        .map(|user| {
+            let (display_name, account_id) = gh_user_label(Some(user));
+            Participant {
+                display_name,
+                account_id,
+                role: "REVIEWER".to_string(),
+                approved: false,
+            }
+        })
+        .collect()
+}
+
+fn map_gh_pr_summary(pr: GhPullRequest) -> PullRequestSummary {
+    let state = gh_state(&pr);
+    let (author_display_name, author_account_id) = gh_user_label(pr.user);
+    let comment_count = pr.comments.unwrap_or(0) + pr.review_comments.unwrap_or(0);
+    PullRequestSummary {
+        id: pr.number,
+        title: pr.title,
+        author_display_name,
+        author_account_id,
+        source_branch: pr.head.r#ref,
+        destination_branch: pr.base.r#ref,
+        state,
+        draft: pr.draft,
+        comment_count,
+        created_on: pr.created_at,
+        updated_on: pr.updated_at,
+        reviewers: gh_reviewers(pr.requested_reviewers),
+    }
+}
+
+fn map_gh_pr_detail(pr: GhPullRequest) -> PullRequestDetail {
+    let state = gh_state(&pr);
+    let (author_display_name, _) = gh_user_label(pr.user);
+    PullRequestDetail {
+        id: pr.number,
+        title: pr.title,
+        description_raw: pr.body.unwrap_or_default(),
+        state,
+        draft: pr.draft,
+        author_display_name,
+        reviewers: gh_reviewers(pr.requested_reviewers),
+        source_branch: pr.head.r#ref,
+        destination_branch: pr.base.r#ref,
+        created_on: pr.created_at,
+        updated_on: pr.updated_at,
+    }
+}
+
+fn map_gh_file(file: GhFile) -> DiffstatEntry {
+    let status = match file.status.as_str() {
+        "removed" => "removed",
+        "renamed" => "renamed",
+        "added" => "added",
+        _ => "modified",
+    };
+    DiffstatEntry {
+        status: status.to_string(),
+        lines_added: file.additions,
+        lines_removed: file.deletions,
+        old_path: file.previous_filename,
+        new_path: Some(file.filename),
+    }
+}
+
+fn map_gh_review_comment(comment: GhReviewComment) -> PrComment {
+    let (user_display_name, _) = gh_user_label(comment.user);
+    let is_left = comment
+        .side
+        .as_deref()
+        .map(|side| side.eq_ignore_ascii_case("LEFT"))
+        .unwrap_or(false);
+    PrComment {
+        id: comment.id,
+        parent_id: comment.in_reply_to_id,
+        content_raw: comment.body,
+        content_html: comment.body_html,
+        user_display_name,
+        created_on: comment.created_at,
+        deleted: false,
+        inline: Some(InlineAnchor {
+            path: comment.path,
+            to: if is_left { None } else { comment.line },
+            from: if is_left {
+                comment.original_line.or(comment.line)
+            } else {
+                None
+            },
+        }),
+    }
+}
+
+fn map_gh_issue_comment(comment: GhIssueComment) -> PrComment {
+    let (user_display_name, _) = gh_user_label(comment.user);
+    PrComment {
+        id: comment.id,
+        parent_id: None,
+        content_raw: comment.body,
+        content_html: comment.body_html,
+        user_display_name,
+        created_on: comment.created_at,
+        deleted: false,
+        inline: None,
+    }
+}
+
+fn github_paginated_get<T: DeserializeOwned>(
+    client: &GithubClient,
+    mut url: String,
+) -> Result<Vec<T>, String> {
+    let mut out = Vec::new();
+    loop {
+        let resp = github_send_checked(client.get(&url))?;
+        let has_next = resp
+            .headers()
+            .get(reqwest::header::LINK)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.contains(r#"rel="next""#))
+            .unwrap_or(false);
+        out.extend(resp.json::<Vec<T>>().map_err(|e| e.to_string())?);
+        if !has_next {
+            break;
+        }
+        let separator = if url.contains('?') { '&' } else { '?' };
+        let page = url
+            .split("page=")
+            .nth(1)
+            .and_then(|tail| tail.split('&').next())
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(1)
+            + 1;
+        if url.contains("page=") {
+            url = url
+                .split('&')
+                .map(|part| {
+                    if part.contains("page=") {
+                        format!("page={page}")
+                    } else {
+                        part.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("&");
+        } else {
+            url = format!("{url}{separator}page={page}");
+        }
+    }
+    Ok(out)
+}
+
+fn fetch_github_pull_request_detail(
+    client: &GithubClient,
+    owner: &str,
+    repo: &str,
+    id: u32,
+) -> Result<PullRequestDetail, String> {
+    let url = format!("{}/pulls/{id}", github_repo_base(owner, repo)?);
+    let pr: GhPullRequest = github_get_json(client.get(&url))?;
+    Ok(map_gh_pr_detail(pr))
+}
+
 fn fetch_pull_request_detail(
     client: &BitbucketClient,
     workspace: &str,
@@ -658,6 +1058,111 @@ fn fetch_diffstat_entries(
     Ok(out)
 }
 
+fn fetch_github_pull_requests_page(
+    client: &GithubClient,
+    owner: &str,
+    repo: &str,
+    opts: &ListPrOptions,
+) -> Result<PullRequestPage, String> {
+    let page = opts.page.unwrap_or(1);
+    let per_page = opts.pagelen.unwrap_or(30).min(100);
+    let state = match opts.state.as_deref() {
+        Some("MERGED") | Some("DECLINED") | Some("SUPERSEDED") => "closed",
+        Some("ALL") => "all",
+        _ => "open",
+    };
+    let url = format!(
+        "{}/pulls?state={state}&per_page={per_page}&page={page}",
+        github_repo_base(owner, repo)?
+    );
+    let mut values: Vec<PullRequestSummary> =
+        github_get_json::<Vec<GhPullRequest>>(client.get(&url))?
+            .into_iter()
+            .filter(|pr| {
+                let mapped = gh_state(pr);
+                match opts.state.as_deref() {
+                    Some("MERGED") => mapped == "MERGED",
+                    Some("DECLINED") | Some("SUPERSEDED") => mapped == "DECLINED",
+                    _ => true,
+                }
+            })
+            .map(map_gh_pr_summary)
+            .collect();
+    if let Some(query) = opts.query.as_ref().filter(|query| !query.is_empty()) {
+        let query = query.to_lowercase();
+        values.retain(|pr| {
+            pr.title.to_lowercase().contains(&query)
+                || pr.source_branch.to_lowercase().contains(&query)
+                || pr.author_display_name.to_lowercase().contains(&query)
+                || pr.id.to_string().contains(&query)
+        });
+    }
+    if let Some(updated_after) = opts
+        .updated_after
+        .as_ref()
+        .filter(|value| !value.is_empty())
+    {
+        values.retain(|pr| pr.updated_on.as_str() >= updated_after.as_str());
+    }
+    Ok(PullRequestPage {
+        size: values.len() as u32,
+        page,
+        has_next: values.len() as u32 == per_page,
+        values,
+    })
+}
+
+fn fetch_github_diffstat_entries(
+    client: &GithubClient,
+    owner: &str,
+    repo: &str,
+    id: u32,
+) -> Result<Vec<DiffstatEntry>, String> {
+    let url = format!(
+        "{}/pulls/{id}/files?per_page=100&page=1",
+        github_repo_base(owner, repo)?
+    );
+    Ok(github_paginated_get::<GhFile>(client, url)?
+        .into_iter()
+        .map(map_gh_file)
+        .collect())
+}
+
+fn fetch_github_comments(
+    client: &GithubClient,
+    owner: &str,
+    repo: &str,
+    id: u32,
+) -> Result<Vec<PrComment>, String> {
+    let base = github_repo_base(owner, repo)?;
+    let review_comments = github_paginated_get::<GhReviewComment>(
+        client,
+        format!("{base}/pulls/{id}/comments?per_page=100&page=1"),
+    )?;
+    let issue_comments = github_paginated_get::<GhIssueComment>(
+        client,
+        format!("{base}/issues/{id}/comments?per_page=100&page=1"),
+    )?;
+    let mut out: Vec<PrComment> = review_comments
+        .into_iter()
+        .map(map_gh_review_comment)
+        .chain(issue_comments.into_iter().map(map_gh_issue_comment))
+        .collect();
+    out.sort_by(|a, b| a.created_on.cmp(&b.created_on));
+    Ok(out)
+}
+
+fn fetch_github_head_sha(
+    client: &GithubClient,
+    owner: &str,
+    repo: &str,
+    id: u32,
+) -> Result<String, String> {
+    let url = format!("{}/pulls/{id}", github_repo_base(owner, repo)?);
+    let pr: GhPullRequest = github_get_json(client.get(&url))?;
+    Ok(pr.head.sha)
+}
+
 fn cached_closed_metrics_for_repos(repos: &[RepoRef]) -> Result<Vec<ClosedPrMetric>, String> {
     if repos.is_empty() {
         return Ok(Vec::new());
@@ -682,6 +1187,7 @@ pub fn load_config() -> Result<AppConfig, String> {
     let mut cfg = config::load();
     cfg.configured = !cfg.repos.is_empty();
     cfg.has_credentials = credentials::has();
+    cfg.has_github_credentials = credentials::has_github();
     cfg.has_jira = credentials::has_jira();
     cfg.has_notion = credentials::has_notion();
     Ok(cfg)
@@ -697,6 +1203,7 @@ pub fn validate_repo_review_config(
 #[tauri::command]
 pub fn save_config(
     repos: Vec<RepoRef>,
+    review_provider: ReviewProvider,
     default_diff_view: String,
     theme: String,
     review_terminal: Option<ReviewTerminal>,
@@ -712,6 +1219,7 @@ pub fn save_config(
 ) -> Result<(), String> {
     config::save(&AppConfig {
         repos,
+        review_provider,
         default_diff_view,
         theme,
         review_terminal,
@@ -726,6 +1234,7 @@ pub fn save_config(
         notifications_enabled,
         configured: false,
         has_credentials: false,
+        has_github_credentials: false,
         has_jira: false,
         has_notion: false,
         workspace: None,
@@ -736,6 +1245,15 @@ pub fn save_config(
 #[tauri::command]
 pub fn save_credentials(username: String, token: String) -> Result<(), String> {
     credentials::store(&Credentials { username, token })
+}
+
+#[tauri::command]
+pub fn save_github_token(token: String) -> Result<(), String> {
+    if token.trim().is_empty() {
+        credentials::clear_github_token()
+    } else {
+        credentials::store_github_token(token.trim())
+    }
 }
 
 #[tauri::command]
@@ -767,28 +1285,56 @@ pub fn save_notion_token(token: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn test_connection(username: String, token: String) -> Result<WorkspaceUser, String> {
-    run(move || {
-        let client = BitbucketClient::new(Credentials { username, token })?;
-        let user: BbUser = get_json(client.get(&format!("{BASE}/user")))?;
-        Ok(WorkspaceUser {
-            display_name: user.display_name,
-            account_id: user.account_id,
-        })
+pub async fn test_connection(
+    provider: Option<ReviewProvider>,
+    username: String,
+    token: String,
+) -> Result<WorkspaceUser, String> {
+    run(move || match provider.unwrap_or_default() {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::new(Credentials { username, token })?;
+            let user: BbUser = get_json(client.get(&format!("{BASE}/user")))?;
+            Ok(WorkspaceUser {
+                display_name: user.display_name,
+                account_id: user.account_id,
+            })
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::new(token)?;
+            let user: GhUser = github_get_json(client.get("https://api.github.com/user"))?;
+            let (display_name, account_id) = gh_user_label(Some(user));
+            Ok(WorkspaceUser {
+                display_name,
+                account_id,
+            })
+        }
     })
     .await
 }
 
 #[tauri::command]
-pub async fn get_current_user() -> Result<WorkspaceUser, String> {
-    run(move || {
-        let client = BitbucketClient::from_stored()?;
-        let user: BbUser = get_json(client.get(&format!("{BASE}/user")))?;
-        Ok(WorkspaceUser {
-            display_name: user.display_name,
-            account_id: user.account_id,
-        })
-    })
+pub async fn get_current_user(provider: Option<ReviewProvider>) -> Result<WorkspaceUser, String> {
+    run(
+        move || match provider.unwrap_or_else(|| config::load().review_provider) {
+            ReviewProvider::Bitbucket => {
+                let client = BitbucketClient::from_stored()?;
+                let user: BbUser = get_json(client.get(&format!("{BASE}/user")))?;
+                Ok(WorkspaceUser {
+                    display_name: user.display_name,
+                    account_id: user.account_id,
+                })
+            }
+            ReviewProvider::Github => {
+                let client = GithubClient::from_stored()?;
+                let user: GhUser = github_get_json(client.get("https://api.github.com/user"))?;
+                let (display_name, account_id) = gh_user_label(Some(user));
+                Ok(WorkspaceUser {
+                    display_name,
+                    account_id,
+                })
+            }
+        },
+    )
     .await
 }
 
@@ -798,13 +1344,20 @@ pub async fn get_current_user() -> Result<WorkspaceUser, String> {
 
 #[tauri::command]
 pub async fn list_pull_requests(
+    provider: Option<ReviewProvider>,
     workspace: String,
     repo: String,
     opts: ListPrOptions,
 ) -> Result<PullRequestPage, String> {
-    run(move || {
-        let client = BitbucketClient::from_stored()?;
-        fetch_pull_requests_page(&client, &workspace, &repo, &opts)
+    run(move || match provider_for(provider, &workspace, &repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            fetch_pull_requests_page(&client, &workspace, &repo, &opts)
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            fetch_github_pull_requests_page(&client, &workspace, &repo, &opts)
+        }
     })
     .await
 }
@@ -835,29 +1388,61 @@ pub async fn sync_closed_pr_metrics(
             });
         }
 
-        let client = BitbucketClient::from_stored()?;
         let limit = options.limit_per_state.unwrap_or(25).clamp(1, 100);
         let states = ["MERGED", "DECLINED", "SUPERSEDED"];
         let mut synced_count = 0;
 
         for repo_ref in &repos {
             for state in states {
-                let page = fetch_pull_requests_page(
-                    &client,
-                    &repo_ref.workspace,
-                    &repo_ref.repo,
-                    &ListPrOptions {
-                        state: Some(state.to_string()),
-                        page: Some(1),
-                        pagelen: Some(limit),
-                        query: None,
-                        updated_after: options.updated_after.clone(),
-                    },
-                )?;
+                let opts = ListPrOptions {
+                    state: Some(state.to_string()),
+                    page: Some(1),
+                    pagelen: Some(limit),
+                    query: None,
+                    updated_after: options.updated_after.clone(),
+                };
+                let page = match repo_ref.provider {
+                    ReviewProvider::Bitbucket => {
+                        let client = BitbucketClient::from_stored()?;
+                        fetch_pull_requests_page(
+                            &client,
+                            &repo_ref.workspace,
+                            &repo_ref.repo,
+                            &opts,
+                        )?
+                    }
+                    ReviewProvider::Github => {
+                        let client = GithubClient::from_stored()?;
+                        fetch_github_pull_requests_page(
+                            &client,
+                            &repo_ref.workspace,
+                            &repo_ref.repo,
+                            &opts,
+                        )?
+                    }
+                };
 
                 for pr in page.values {
-                    let diffstat =
-                        fetch_diffstat_entries(&client, &repo_ref.workspace, &repo_ref.repo, pr.id);
+                    let diffstat = match repo_ref.provider {
+                        ReviewProvider::Bitbucket => {
+                            let client = BitbucketClient::from_stored()?;
+                            fetch_diffstat_entries(
+                                &client,
+                                &repo_ref.workspace,
+                                &repo_ref.repo,
+                                pr.id,
+                            )
+                        }
+                        ReviewProvider::Github => {
+                            let client = GithubClient::from_stored()?;
+                            fetch_github_diffstat_entries(
+                                &client,
+                                &repo_ref.workspace,
+                                &repo_ref.repo,
+                                pr.id,
+                            )
+                        }
+                    };
                     let (additions, deletions, files_changed, diffstat_cached) = match diffstat {
                         Ok(entries) => {
                             let additions = entries.iter().map(|entry| entry.lines_added).sum();
@@ -914,81 +1499,144 @@ pub async fn sync_closed_pr_metrics(
 
 #[tauri::command]
 pub async fn get_pull_request(
+    provider: Option<ReviewProvider>,
     workspace: String,
     repo: String,
     id: u32,
 ) -> Result<PullRequestDetail, String> {
-    run(move || {
-        let client = BitbucketClient::from_stored()?;
-        fetch_pull_request_detail(&client, &workspace, &repo, id)
+    run(move || match provider_for(provider, &workspace, &repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            fetch_pull_request_detail(&client, &workspace, &repo, id)
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            fetch_github_pull_request_detail(&client, &workspace, &repo, id)
+        }
     })
     .await
 }
 
 #[tauri::command]
 pub async fn approve_pull_request(
+    provider: Option<ReviewProvider>,
     workspace: String,
     repo: String,
     id: u32,
 ) -> Result<PullRequestDetail, String> {
-    run(move || {
-        let client = BitbucketClient::from_stored()?;
-        if !dry_run() {
-            let url = format!(
-                "{}/pullrequests/{id}/approve",
-                repo_base(&workspace, &repo)?
-            );
-            send_checked(client.post(&url))?;
-        } else {
-            eprintln!("[dry-run] approve PR #{id}");
+    run(move || match provider_for(provider, &workspace, &repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            if !dry_run() {
+                let url = format!(
+                    "{}/pullrequests/{id}/approve",
+                    repo_base(&workspace, &repo)?
+                );
+                send_checked(client.post(&url))?;
+            } else {
+                eprintln!("[dry-run] approve PR #{id}");
+            }
+            fetch_pull_request_detail(&client, &workspace, &repo, id)
         }
-        fetch_pull_request_detail(&client, &workspace, &repo, id)
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            if !dry_run() {
+                let url = format!(
+                    "{}/pulls/{id}/reviews",
+                    github_repo_base(&workspace, &repo)?
+                );
+                github_send_checked(client.post(&url).json(&json!({ "event": "APPROVE" })))?;
+            } else {
+                eprintln!("[dry-run] approve GitHub PR #{id}");
+            }
+            fetch_github_pull_request_detail(&client, &workspace, &repo, id)
+        }
     })
     .await
 }
 
 #[tauri::command]
 pub async fn get_branch_status(
+    provider: Option<ReviewProvider>,
     workspace: String,
     repo: String,
     source: String,
     destination: String,
 ) -> Result<BranchStatus, String> {
-    run(move || {
-        let client = BitbucketClient::from_stored()?;
-        let base = repo_base(&workspace, &repo)?;
-        let (behind, behind_capped) = count_commits(&client, &base, &destination, &source, 100)?;
-        let (ahead, ahead_capped) = count_commits(&client, &base, &source, &destination, 100)?;
-        Ok(BranchStatus {
-            behind,
-            ahead,
-            behind_capped,
-            ahead_capped,
-        })
+    run(move || match provider_for(provider, &workspace, &repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            let base = repo_base(&workspace, &repo)?;
+            let (behind, behind_capped) =
+                count_commits(&client, &base, &destination, &source, 100)?;
+            let (ahead, ahead_capped) = count_commits(&client, &base, &source, &destination, 100)?;
+            Ok(BranchStatus {
+                behind,
+                ahead,
+                behind_capped,
+                ahead_capped,
+            })
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            let base = github_repo_base(&workspace, &repo)?;
+            let compare = format!(
+                "{base}/compare/{}...{}",
+                encode_path_segment(&destination),
+                encode_path_segment(&source)
+            );
+            let gh: GhCompare = github_get_json(client.get(&compare))?;
+            Ok(BranchStatus {
+                behind: gh.behind_by,
+                ahead: gh.ahead_by,
+                behind_capped: false,
+                ahead_capped: false,
+            })
+        }
     })
     .await
 }
 
 #[tauri::command]
 pub async fn get_diffstat(
+    provider: Option<ReviewProvider>,
     workspace: String,
     repo: String,
     id: u32,
 ) -> Result<Vec<DiffstatEntry>, String> {
-    run(move || {
-        let client = BitbucketClient::from_stored()?;
-        fetch_diffstat_entries(&client, &workspace, &repo, id)
+    run(move || match provider_for(provider, &workspace, &repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            fetch_diffstat_entries(&client, &workspace, &repo, id)
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            fetch_github_diffstat_entries(&client, &workspace, &repo, id)
+        }
     })
     .await
 }
 
 #[tauri::command]
-pub async fn get_pr_diff(workspace: String, repo: String, id: u32) -> Result<String, String> {
-    run(move || {
-        let client = BitbucketClient::from_stored()?;
-        let url = format!("{}/pullrequests/{id}/diff", repo_base(&workspace, &repo)?);
-        let resp = send_checked(client.get(&url))?;
-        resp.text().map_err(|e| e.to_string())
+pub async fn get_pr_diff(
+    provider: Option<ReviewProvider>,
+    workspace: String,
+    repo: String,
+    id: u32,
+) -> Result<String, String> {
+    run(move || match provider_for(provider, &workspace, &repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            let url = format!("{}/pullrequests/{id}/diff", repo_base(&workspace, &repo)?);
+            let resp = send_checked(client.get(&url))?;
+            resp.text().map_err(|e| e.to_string())
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            let url = format!("{}/pulls/{id}", github_repo_base(&workspace, &repo)?);
+            let resp = github_send_checked(client.get_diff(&url))?;
+            resp.text().map_err(|e| e.to_string())
+        }
     })
     .await
 }
@@ -999,32 +1647,42 @@ pub async fn get_pr_diff(workspace: String, repo: String, id: u32) -> Result<Str
 
 #[tauri::command]
 pub async fn list_comments(
+    provider: Option<ReviewProvider>,
     workspace: String,
     repo: String,
     id: u32,
 ) -> Result<Vec<PrComment>, String> {
     run(move || {
-        let client = BitbucketClient::from_stored()?;
-        let mut url = format!(
-            "{}/pullrequests/{id}/comments?pagelen=100&fields=next,values.id,values.created_on,values.deleted,values.content.raw,values.content.html,values.user.display_name,values.inline.path,values.inline.to,values.inline.from,values.parent.id",
-            repo_base(&workspace, &repo)?
-        );
-        let mut out = Vec::new();
-        loop {
-            let page: BbCommentPage = get_json(client.get(&url))?;
-            out.extend(page.values.into_iter().map(map_comment));
-            match page.next {
-                Some(next) => url = next,
-                None => break,
+        match provider_for(provider, &workspace, &repo) {
+            ReviewProvider::Bitbucket => {
+                let client = BitbucketClient::from_stored()?;
+                let mut url = format!(
+                    "{}/pullrequests/{id}/comments?pagelen=100&fields=next,values.id,values.created_on,values.deleted,values.content.raw,values.content.html,values.user.display_name,values.inline.path,values.inline.to,values.inline.from,values.parent.id",
+                    repo_base(&workspace, &repo)?
+                );
+                let mut out = Vec::new();
+                loop {
+                    let page: BbCommentPage = get_json(client.get(&url))?;
+                    out.extend(page.values.into_iter().map(map_comment));
+                    match page.next {
+                        Some(next) => url = next,
+                        None => break,
+                    }
+                }
+                Ok(out)
+            }
+            ReviewProvider::Github => {
+                let client = GithubClient::from_stored()?;
+                fetch_github_comments(&client, &workspace, &repo, id)
             }
         }
-        Ok(out)
     })
     .await
 }
 
 #[tauri::command]
 pub async fn create_inline_comment(
+    provider: Option<ReviewProvider>,
     workspace: String,
     repo: String,
     id: u32,
@@ -1051,31 +1709,62 @@ pub async fn create_inline_comment(
                 }),
             });
         }
-        let client = BitbucketClient::from_stored()?;
-        let url = format!(
-            "{}/pullrequests/{id}/comments",
-            repo_base(&workspace, &repo)?
-        );
-        let mut inline = serde_json::Map::new();
-        inline.insert("path".into(), json!(req.path));
-        if let Some(to) = req.to {
-            inline.insert("to".into(), json!(to));
+        match provider_for(provider, &workspace, &repo) {
+            ReviewProvider::Bitbucket => {
+                let client = BitbucketClient::from_stored()?;
+                let url = format!(
+                    "{}/pullrequests/{id}/comments",
+                    repo_base(&workspace, &repo)?
+                );
+                let mut inline = serde_json::Map::new();
+                inline.insert("path".into(), json!(req.path));
+                if let Some(to) = req.to {
+                    inline.insert("to".into(), json!(to));
+                }
+                if let Some(from) = req.from {
+                    inline.insert("from".into(), json!(from));
+                }
+                let mut body = json!({ "content": { "raw": req.raw }, "inline": inline });
+                if let Some(parent_id) = req.parent_id {
+                    body["parent"] = json!({ "id": parent_id });
+                }
+                let bb: BbComment = get_json(client.post(&url).json(&body))?;
+                Ok(map_comment(bb))
+            }
+            ReviewProvider::Github => {
+                let client = GithubClient::from_stored()?;
+                let base = github_repo_base(&workspace, &repo)?;
+                if let Some(parent_id) = req.parent_id {
+                    let url = format!("{base}/pulls/{id}/comments/{parent_id}/replies");
+                    let comment: GhReviewComment =
+                        github_get_json(client.post(&url).json(&json!({ "body": req.raw })))?;
+                    return Ok(map_gh_review_comment(comment));
+                }
+                let line = req
+                    .to
+                    .or(req.from)
+                    .ok_or_else(|| "GitHub inline comments require a target line.".to_string())?;
+                let side = if req.to.is_some() { "RIGHT" } else { "LEFT" };
+                let commit_id = fetch_github_head_sha(&client, &workspace, &repo, id)?;
+                let url = format!("{base}/pulls/{id}/comments");
+                let body = json!({
+                    "body": req.raw,
+                    "commit_id": commit_id,
+                    "path": req.path,
+                    "line": line,
+                    "side": side,
+                });
+                let comment: GhReviewComment = github_get_json(client.post(&url).json(&body))?;
+                Ok(map_gh_review_comment(comment))
+            }
         }
-        if let Some(from) = req.from {
-            inline.insert("from".into(), json!(from));
-        }
-        let mut body = json!({ "content": { "raw": req.raw }, "inline": inline });
-        if let Some(parent_id) = req.parent_id {
-            body["parent"] = json!({ "id": parent_id });
-        }
-        let bb: BbComment = get_json(client.post(&url).json(&body))?;
-        Ok(map_comment(bb))
     })
     .await
 }
 
 #[tauri::command]
 pub async fn create_general_comment(
+    provider: Option<ReviewProvider>,
     workspace: String,
     repo: String,
     id: u32,
@@ -1096,36 +1785,72 @@ pub async fn create_general_comment(
                 inline: None,
             });
         }
-        let client = BitbucketClient::from_stored()?;
-        let url = format!(
-            "{}/pullrequests/{id}/comments",
-            repo_base(&workspace, &repo)?
-        );
-        let mut body = json!({ "content": { "raw": raw } });
-        if let Some(parent_id) = parent_id {
-            body["parent"] = json!({ "id": parent_id });
+        match provider_for(provider, &workspace, &repo) {
+            ReviewProvider::Bitbucket => {
+                let client = BitbucketClient::from_stored()?;
+                let url = format!(
+                    "{}/pullrequests/{id}/comments",
+                    repo_base(&workspace, &repo)?
+                );
+                let mut body = json!({ "content": { "raw": raw } });
+                if let Some(parent_id) = parent_id {
+                    body["parent"] = json!({ "id": parent_id });
+                }
+                let bb: BbComment = get_json(client.post(&url).json(&body))?;
+                Ok(map_comment(bb))
+            }
+            ReviewProvider::Github => {
+                let client = GithubClient::from_stored()?;
+                let base = github_repo_base(&workspace, &repo)?;
+                if let Some(parent_id) = parent_id {
+                    let url = format!("{base}/pulls/{id}/comments/{parent_id}/replies");
+                    if let Ok(comment) = github_get_json::<GhReviewComment>(
+                        client.post(&url).json(&json!({ "body": raw })),
+                    ) {
+                        return Ok(map_gh_review_comment(comment));
+                    }
+                }
+                let url = format!("{base}/issues/{id}/comments");
+                let comment: GhIssueComment =
+                    github_get_json(client.post(&url).json(&json!({ "body": raw })))?;
+                Ok(map_gh_issue_comment(comment))
+            }
         }
-        let bb: BbComment = get_json(client.post(&url).json(&body))?;
-        Ok(map_comment(bb))
     })
     .await
 }
 
 #[tauri::command]
 pub async fn delete_comment(
+    provider: Option<ReviewProvider>,
     workspace: String,
     repo: String,
     id: u32,
     comment_id: u32,
 ) -> Result<(), String> {
-    run(move || {
-        let client = BitbucketClient::from_stored()?;
-        let url = format!(
-            "{}/pullrequests/{id}/comments/{comment_id}",
-            repo_base(&workspace, &repo)?
-        );
-        send_checked(client.delete(&url))?;
-        Ok(())
+    run(move || match provider_for(provider, &workspace, &repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            let url = format!(
+                "{}/pullrequests/{id}/comments/{comment_id}",
+                repo_base(&workspace, &repo)?
+            );
+            send_checked(client.delete(&url))?;
+            Ok(())
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            let base = github_repo_base(&workspace, &repo)?;
+            let review_url = format!("{base}/pulls/comments/{comment_id}");
+            match github_send_checked(client.delete(&review_url)) {
+                Ok(_) => Ok(()),
+                Err(_) => {
+                    let issue_url = format!("{base}/issues/comments/{comment_id}");
+                    github_send_checked(client.delete(&issue_url))?;
+                    Ok(())
+                }
+            }
+        }
     })
     .await
 }

@@ -62,12 +62,14 @@ import type {
   PrComment,
   PullRequestSummary,
   RepoRef,
+  ReviewProvider,
   ReviewReference,
 } from "@/types";
 import { PrHeader } from "./PrHeader";
 import { ReviewReferencesPanel } from "./ReviewReferencesPanel";
 
 export interface PrDetailPanelProps {
+  provider: ReviewProvider;
   workspace: string | null;
   repo: string | null;
   prId: number | null;
@@ -579,6 +581,7 @@ function ConflictResolutionActions({
 }
 
 interface ApprovePullRequestButtonProps {
+  provider: ReviewProvider;
   workspace: string;
   repo: string;
   prId: number;
@@ -588,6 +591,7 @@ interface ApprovePullRequestButtonProps {
 
 function ApprovePullRequestButton({
   workspace,
+  provider,
   repo,
   prId,
   approved,
@@ -601,7 +605,7 @@ function ApprovePullRequestButton({
     setBusy(true);
     setError(null);
     try {
-      await tauriCall("approve_pull_request", { workspace, repo, id: prId });
+      await tauriCall("approve_pull_request", { provider, workspace, repo, id: prId });
       await onApproved();
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -621,7 +625,7 @@ function ApprovePullRequestButton({
         title={
           approved
             ? "You have already approved this pull request"
-            : "Approve this pull request on Bitbucket"
+            : `Approve this pull request on ${provider === "github" ? "GitHub" : "Bitbucket"}`
         }
       >
         {busy ? <CircleNotch size={14} className="animate-spin" /> : <CheckCircle size={14} />}
@@ -638,6 +642,7 @@ function ApprovePullRequestButton({
 
 /** Loads + renders a PR's header, diff, existing comments, and the review composer. */
 export function PrDetailPanel({
+  provider,
   workspace,
   repo,
   prId,
@@ -666,15 +671,21 @@ export function PrDetailPanel({
   publishDraft,
   publishAll,
 }: PrDetailPanelProps) {
-  const { pr, loading, error, refresh: refreshPullRequest } = usePullRequest(workspace, repo, prId);
+  const {
+    pr,
+    loading,
+    error,
+    refresh: refreshPullRequest,
+  } = usePullRequest(provider, workspace, repo, prId);
   const {
     files,
     raw: rawDiff,
     loading: diffLoading,
     error: diffError,
-  } = useDiff(workspace, repo, prId);
-  const { comments, refresh: refreshComments } = useComments(workspace, repo, prId);
+  } = useDiff(provider, workspace, repo, prId);
+  const { comments, refresh: refreshComments } = useComments(provider, workspace, repo, prId);
   const { status: branchStatus, refresh: refreshBranchStatus } = useBranchStatus(
+    provider,
     workspace,
     repo,
     pr?.sourceBranch ?? null,
@@ -1120,7 +1131,9 @@ export function PrDetailPanel({
           syncBusy={branchSyncLoading}
           htmlUrl={
             workspace && repo
-              ? `https://bitbucket.org/${workspace}/${repo}/pull-requests/${pr.id}`
+              ? provider === "github"
+                ? `https://github.com/${workspace}/${repo}/pull/${pr.id}`
+                : `https://bitbucket.org/${workspace}/${repo}/pull-requests/${pr.id}`
               : null
           }
           actions={
@@ -1128,6 +1141,7 @@ export function PrDetailPanel({
               <>
                 {canApprove && workspace && repo && (
                   <ApprovePullRequestButton
+                    provider={provider}
                     workspace={workspace}
                     repo={repo}
                     prId={pr.id}

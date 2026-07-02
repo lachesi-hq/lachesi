@@ -3,7 +3,14 @@ import { extractIssueKeys } from "@/lib/jira";
 import { resolveReviewPrompt } from "@/lib/reviewPrompt";
 import { loadReviewReferences } from "@/lib/reviewReferencesStorage";
 import { tauriCall } from "@/lib/tauri";
-import type { BranchStatus, JiraIssue, NotionPage, PullRequestDetail, RepoRef } from "@/types";
+import type {
+  BranchStatus,
+  JiraIssue,
+  NotionPage,
+  PullRequestDetail,
+  RepoRef,
+  ReviewProvider,
+} from "@/types";
 
 export interface AiReviewPayloadForPr {
   payload: string;
@@ -40,6 +47,7 @@ async function fetchReviewContext(jiraKeys: string[], enabled: boolean): Promise
 export async function buildAiReviewPayloadForPr({
   workspace,
   repo,
+  provider = "bitbucket",
   prId,
   repoConfig,
   jiraBaseUrl,
@@ -47,19 +55,22 @@ export async function buildAiReviewPayloadForPr({
 }: {
   workspace: string;
   repo: string;
+  provider?: ReviewProvider;
   prId: number;
   repoConfig?: RepoRef | null;
   jiraBaseUrl: string | null;
   jiraContextEnabled: boolean;
 }): Promise<AiReviewPayloadForPr> {
   const pr = await tauriCall<PullRequestDetail>("get_pull_request", {
+    provider,
     workspace,
     repo,
     id: prId,
   });
   const [rawDiff, branchStatus] = await Promise.all([
-    tauriCall<string>("get_pr_diff", { workspace, repo, id: prId }),
+    tauriCall<string>("get_pr_diff", { provider, workspace, repo, id: prId }),
     tauriCall<BranchStatus>("get_branch_status", {
+      provider,
       workspace,
       repo,
       source: pr.sourceBranch,
