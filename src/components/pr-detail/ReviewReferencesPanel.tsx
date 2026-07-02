@@ -58,6 +58,19 @@ function bitbucketRepositoryUrl(workspace: string, repo: string): string {
   return `https://bitbucket.org/${workspace}/${repo}`;
 }
 
+function repositoryUrl(repo: RepoRef): string {
+  return (repo.provider ?? "bitbucket") === "github"
+    ? `https://github.com/${repo.workspace}/${repo.repo}`
+    : bitbucketRepositoryUrl(repo.workspace, repo.repo);
+}
+
+function pullRequestUrl(pr: PullRequestSummary, repos: RepoRef[]): string {
+  const repo = repos.find((item) => item.workspace === pr.workspace && item.repo === pr.repo);
+  return (repo?.provider ?? "bitbucket") === "github"
+    ? `https://github.com/${pr.workspace}/${pr.repo}/pull/${pr.id}`
+    : bitbucketPullRequestUrl(pr.workspace, pr.repo, pr.id);
+}
+
 function pullRequestOptionKey(pr: PullRequestSummary): string {
   return `${pr.workspace}/${pr.repo}#${pr.id}`;
 }
@@ -176,7 +189,7 @@ export function ReviewReferencesPanel({
     setForm((prev) => ({
       ...prev,
       title: `#${pr.id} ${pr.title}`,
-      url: bitbucketPullRequestUrl(pr.workspace, pr.repo, pr.id),
+      url: pullRequestUrl(pr, availableRepositories),
       workspace: pr.workspace,
       repo: pr.repo,
       prId: String(pr.id),
@@ -200,7 +213,7 @@ export function ReviewReferencesPanel({
     setForm((prev) => ({
       ...prev,
       title: `${repo.workspace}/${repo.repo}`,
-      url: bitbucketRepositoryUrl(repo.workspace, repo.repo),
+      url: repositoryUrl(repo),
       workspace: repo.workspace,
       repo: repo.repo,
       localPath: repo.localPath ?? "",

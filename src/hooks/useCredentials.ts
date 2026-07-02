@@ -1,13 +1,19 @@
 import { useCallback } from "react";
 import { tauriCall } from "@/lib/tauri";
+import type { ReviewProvider } from "@/types";
 
 export interface ConnectionUser {
   displayName: string;
 }
 
 interface UseCredentialsResult {
-  testConnection: (username: string, token: string) => Promise<ConnectionUser>;
+  testConnection: (
+    provider: ReviewProvider,
+    username: string,
+    token: string,
+  ) => Promise<ConnectionUser>;
   saveCredentials: (username: string, token: string) => Promise<void>;
+  saveGithubToken: (token: string) => Promise<void>;
   clearCredentials: () => Promise<void>;
   saveJiraToken: (token: string) => Promise<void>;
   saveNotionToken: (token: string) => Promise<void>;
@@ -16,13 +22,18 @@ interface UseCredentialsResult {
 /** Credential operations: validate, persist (keychain), and clear. */
 export function useCredentials(): UseCredentialsResult {
   const testConnection = useCallback(
-    (username: string, token: string) =>
-      tauriCall<ConnectionUser>("test_connection", { username, token }),
+    (provider: ReviewProvider, username: string, token: string) =>
+      tauriCall<ConnectionUser>("test_connection", { provider, username, token }),
     [],
   );
 
   const saveCredentials = useCallback(
     (username: string, token: string) => tauriCall<void>("save_credentials", { username, token }),
+    [],
+  );
+
+  const saveGithubToken = useCallback(
+    (token: string) => tauriCall<void>("save_github_token", { token }),
     [],
   );
 
@@ -38,5 +49,12 @@ export function useCredentials(): UseCredentialsResult {
     [],
   );
 
-  return { testConnection, saveCredentials, clearCredentials, saveJiraToken, saveNotionToken };
+  return {
+    testConnection,
+    saveCredentials,
+    saveGithubToken,
+    clearCredentials,
+    saveJiraToken,
+    saveNotionToken,
+  };
 }

@@ -83,6 +83,7 @@ pub fn run() {
             bitbucket::validate_repo_review_config,
             bitbucket::save_config,
             bitbucket::save_credentials,
+            bitbucket::save_github_token,
             bitbucket::has_credentials,
             bitbucket::clear_credentials,
             bitbucket::save_jira_token,

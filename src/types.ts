@@ -1,8 +1,11 @@
 // Core domain types for lachesi. Frontend DTOs mirror the Rust command outputs
 // (serde `rename_all = "camelCase"`), so the IPC boundary stays type-safe.
 
-/** A Bitbucket repository the app tracks. */
+export type ReviewProvider = "bitbucket" | "github";
+
+/** A source-control repository the app tracks. */
 export interface RepoRef {
+  provider?: ReviewProvider;
   workspace: string;
   repo: string;
   localPath?: string | null;
@@ -258,7 +261,6 @@ export interface AiReviewJob {
 }
 
 export type ReviewSchemaVersion = "v0.1";
-export type ReviewProvider = "bitbucket";
 export type ReviewFindingSeverity = "info" | "low" | "medium" | "high" | "critical";
 export type ReviewFindingConfidence = "low" | "medium" | "high";
 export type ReviewFindingCategory =
@@ -521,6 +523,7 @@ export interface ReviewTerminalOption {
 
 export interface AppConfig {
   repos: RepoRef[];
+  reviewProvider: ReviewProvider;
   defaultDiffView: DiffViewMode;
   theme: "light" | "dark";
   reviewTerminal: ReviewTerminal | null;
@@ -535,6 +538,7 @@ export interface AppConfig {
   notificationsEnabled: boolean;
   configured: boolean;
   hasCredentials: boolean;
+  hasGithubCredentials: boolean;
   hasJira: boolean;
   hasNotion: boolean;
 }

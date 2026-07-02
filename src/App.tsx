@@ -54,6 +54,7 @@ import type {
   PrListFilter,
   PullRequestSummary,
   RepoRef,
+  ReviewProvider,
   ReviewFindingPublicationEvent,
 } from "@/types";
 import { repoKey } from "@/types";
@@ -74,7 +75,8 @@ function lineQuestionLabel(context: AiLineQuestionContext): string {
 export default function App() {
   const { theme, toggle } = useTheme();
   const { config, saveConfig } = useConfig();
-  const { testConnection, saveCredentials, saveJiraToken, saveNotionToken } = useCredentials();
+  const { testConnection, saveCredentials, saveGithubToken, saveJiraToken, saveNotionToken } =
+    useCredentials();
   const { terminals: reviewTerminalOptions } = useReviewTerminals();
   const [filter, setFilter] = useState<PrListFilter>("OPEN");
   const [authorFilter, setAuthorFilter] = useState<string | null>(null);
@@ -92,15 +94,23 @@ export default function App() {
   const [backgroundReviewPrKey, setBackgroundReviewPrKey] = useState<string | null>(null);
   const pendingReviewThreadIdRef = useRef<string | null>(null);
 
+  const reviewProvider = config?.reviewProvider ?? "bitbucket";
   const repos = config?.repos ?? EMPTY_REPOS;
-  const reposKey = repos.map(repoKey).join("|");
-  const { groups, loading, refresh, loadMore } = usePullRequests(repos, filter);
-  const closedPrAnalytics = useClosedPrAnalytics(repos);
-  const currentUser = useCurrentUser(repos.length > 0);
+  const activeRepos = useMemo(
+    () => repos.filter((repo) => (repo.provider ?? "bitbucket") === reviewProvider),
+    [repos, reviewProvider],
+  );
+  const reposKey = activeRepos.map(repoKey).join("|");
+  const { groups, loading, refresh, loadMore } = usePullRequests(activeRepos, filter);
+  const closedPrAnalytics = useClosedPrAnalytics(activeRepos);
+  const currentUser = useCurrentUser(activeRepos.length > 0, reviewProvider);
   const activeSel = selection.kind === "pr" ? selection : null;
   const activeRepo = activeSel
     ? (repos.find(
-        (repo) => repo.workspace === activeSel.workspace && repo.repo === activeSel.repo,
+        (repo) =>
+          (repo.provider ?? "bitbucket") === reviewProvider &&
+          repo.workspace === activeSel.workspace &&
+          repo.repo === activeSel.repo,
       ) ?? null)
     : null;
   const aiReview = useAiReview(
@@ -179,6 +189,7 @@ export default function App() {
         const { payload, pr: detail } = await buildAiReviewPayloadForPr({
           workspace: pr.workspace,
           repo: pr.repo,
+          provider: repoConfig?.provider ?? reviewProvider,
           prId: pr.id,
           repoConfig,
           jiraBaseUrl: config?.jiraBaseUrl ?? null,
@@ -270,6 +281,7 @@ export default function App() {
       config?.jiraBaseUrl,
       notifyReviewFinished,
       repos,
+      reviewProvider,
     ],
   );
 
@@ -285,7 +297,7 @@ export default function App() {
   });
 
   useAutomaticSyncPolling({
-    enabled: repos.length > 0,
+    enabled: activeRepos.length > 0,
     intervalSeconds: config?.automaticSyncIntervalSeconds ?? null,
     contextKey: `${reposKey}:${filter}:${
       activeSel ? `${activeSel.workspace}/${activeSel.repo}#${activeSel.prId}` : "no-active-pr"
@@ -360,6 +372,7 @@ export default function App() {
   };
 
   const draftComments = useDraftComments(
+    activeRepo?.provider ?? reviewProvider,
     activeSel?.workspace ?? null,
     activeSel?.repo ?? null,
     activeSel?.prId ?? null,
@@ -380,8 +393,8 @@ export default function App() {
 
   // First run (or all repos removed): nudge the user to configure.
   useEffect(() => {
-    if (config && config.repos.length === 0) setSelection({ kind: "settings" });
-  }, [config]);
+    if (config && activeRepos.length === 0) setSelection({ kind: "settings" });
+  }, [activeRepos.length, config]);
 
   useEffect(() => {
     if (
@@ -1004,6 +1017,7 @@ export default function App() {
 
   const handleSaveSettings = async ({
     repos: nextRepos,
+    reviewProvider: nextReviewProvider,
     defaultDiffView,
     reviewTerminal,
     aiProvider,
@@ -1017,16 +1031,21 @@ export default function App() {
     notificationsEnabled,
     username,
     token,
+    githubToken,
     jiraToken,
     notionToken,
   }: SettingsSaveInput) => {
     if (username && token) {
       await saveCredentials(username, token);
     }
+    if (githubToken) {
+      await saveGithubToken(githubToken);
+    }
     if (jiraToken) await saveJiraToken(jiraToken);
     if (notionToken) await saveNotionToken(notionToken);
     await saveConfig({
       repos: nextRepos,
+      reviewProvider: nextReviewProvider,
       defaultDiffView,
       theme,
       reviewTerminal,
@@ -1042,9 +1061,34 @@ export default function App() {
     });
   };
 
+  const handleReviewProviderChange = async (nextProvider: ReviewProvider) => {
+    if (!config || nextProvider === reviewProvider) return;
+    setAuthorFilter(null);
+    setRepositoryFilter(null);
+    setSelection({ kind: "pr-list" });
+    await saveConfig({
+      repos,
+      reviewProvider: nextProvider,
+      defaultDiffView: config.defaultDiffView,
+      theme,
+      reviewTerminal: config.reviewTerminal,
+      aiProvider: config.aiProvider,
+      claudeModel: config.claudeModel,
+      claudeEffort: config.claudeEffort,
+      codexModel: config.codexModel,
+      codexEffort: config.codexEffort,
+      jiraBaseUrl: config.jiraBaseUrl,
+      automaticSyncIntervalSeconds: config.automaticSyncIntervalSeconds,
+      menuBarSyncEnabled: config.menuBarSyncEnabled,
+      notificationsEnabled: config.notificationsEnabled,
+    });
+  };
+
   return (
     <>
       <AppShell
+        reviewProvider={reviewProvider}
+        onReviewProviderChange={handleReviewProviderChange}
         headerRight={<ThemeToggle theme={theme} onToggle={toggle} />}
         footer={
           isOverview || isClosedAnalytics || selection.kind === "settings" ? undefined : (
@@ -1170,6 +1214,7 @@ export default function App() {
           ) : selection.kind === "settings" ? (
             <SettingsPage
               repos={repos}
+              reviewProvider={reviewProvider}
               defaultDiffView={config?.defaultDiffView ?? "unified"}
               reviewTerminal={config?.reviewTerminal ?? null}
               aiProvider={config?.aiProvider ?? "claude"}
@@ -1183,6 +1228,7 @@ export default function App() {
               menuBarSyncEnabled={config?.menuBarSyncEnabled ?? true}
               notificationsEnabled={config?.notificationsEnabled ?? false}
               hasCredentials={config?.hasCredentials ?? false}
+              hasGithubCredentials={config?.hasGithubCredentials ?? false}
               hasJira={config?.hasJira ?? false}
               hasNotion={config?.hasNotion ?? false}
               onTestConnection={testConnection}
@@ -1203,6 +1249,7 @@ export default function App() {
             />
           ) : detailPaneOpen ? (
             <PrDetailPanel
+              provider={activeRepo?.provider ?? reviewProvider}
               workspace={activeSel?.workspace ?? null}
               repo={activeSel?.repo ?? null}
               prId={activeSel?.prId ?? null}
@@ -1212,7 +1259,7 @@ export default function App() {
               jiraBaseUrl={config?.jiraBaseUrl ?? null}
               jiraContextEnabled={Boolean(config?.hasJira && config?.jiraBaseUrl)}
               availablePullRequests={availableReviewReferencePullRequests}
-              availableRepositories={repos}
+              availableRepositories={activeRepos}
               reviewReferences={reviewReferences.references}
               addReviewReference={reviewReferences.addReference}
               updateReviewReference={reviewReferences.updateReference}

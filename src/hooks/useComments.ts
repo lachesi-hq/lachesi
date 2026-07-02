@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { tauriCall } from "@/lib/tauri";
-import type { PrComment } from "@/types";
+import type { PrComment, ReviewProvider } from "@/types";
 
 interface UseCommentsResult {
   comments: PrComment[];
@@ -11,6 +11,7 @@ interface UseCommentsResult {
 
 /** Loads all comments for a PR via IPC. */
 export function useComments(
+  provider: ReviewProvider | null,
   workspace: string | null,
   repo: string | null,
   prId: number | null,
@@ -27,13 +28,15 @@ export function useComments(
     setLoading(true);
     setError(null);
     try {
-      setComments(await tauriCall<PrComment[]>("list_comments", { workspace, repo, id: prId }));
+      setComments(
+        await tauriCall<PrComment[]>("list_comments", { provider, workspace, repo, id: prId }),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [workspace, repo, prId]);
+  }, [provider, workspace, repo, prId]);
 
   useEffect(() => {
     void refresh();

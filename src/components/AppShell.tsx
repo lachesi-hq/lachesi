@@ -1,12 +1,15 @@
 import type * as React from "react";
 
 import { cn } from "@/lib/utils";
+import type { ReviewProvider } from "@/types";
 
 export interface AppShellProps {
   /** When omitted the main content fills the full width (overview mode). */
   sidebar?: React.ReactNode;
   main?: React.ReactNode;
   headerRight?: React.ReactNode;
+  reviewProvider?: ReviewProvider;
+  onReviewProviderChange?: (provider: ReviewProvider) => void;
   footer?: React.ReactNode;
   /** Sidebar width in px. */
   sidebarWidth?: number;
@@ -25,6 +28,8 @@ export function AppShell({
   sidebar,
   main,
   headerRight,
+  reviewProvider = "bitbucket",
+  onReviewProviderChange,
   footer,
   sidebarWidth = 340,
   rightPanel,
@@ -52,6 +57,7 @@ export function AppShell({
     }
     return "minmax(0, 1fr)";
   })();
+  const providerLabel = reviewProvider === "github" ? "GitHub" : "Bitbucket";
 
   const panes: React.ReactNode[] = [];
   if (hasSidebar) {
@@ -90,7 +96,19 @@ export function AppShell({
       <header className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-secondary px-3">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold tracking-tight">Lachesi</span>
-          <span className="text-xs text-muted-foreground">Bitbucket review</span>
+          <label className="sr-only" htmlFor="review-provider-select">
+            Review provider
+          </label>
+          <select
+            id="review-provider-select"
+            className="h-7 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={reviewProvider}
+            title={`${providerLabel} review`}
+            onChange={(event) => onReviewProviderChange?.(event.target.value as ReviewProvider)}
+          >
+            <option value="bitbucket">Bitbucket review</option>
+            <option value="github">GitHub review</option>
+          </select>
         </div>
         <div className="flex items-center gap-1">{headerRight}</div>
       </header>

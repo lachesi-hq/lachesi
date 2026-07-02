@@ -30,6 +30,7 @@ import type {
   CodexReviewEffort,
   DiffViewMode,
   RepoRef,
+  ReviewProvider,
   ReviewTerminal,
   ReviewTerminalOption,
 } from "@/types";
@@ -41,11 +42,16 @@ type TestState =
   | { status: "error"; message: string };
 
 function repoRowKey(repo: RepoRef, index: number): string {
-  return `${repo.workspace}:${repo.repo}:${repo.localPath ?? ""}:${index}`;
+  return `${repo.provider ?? "bitbucket"}:${repo.workspace}:${repo.repo}:${repo.localPath ?? ""}:${index}`;
+}
+
+function repoWithProvider(repo: RepoRef): RepoRef {
+  return { ...repo, provider: repo.provider ?? "bitbucket" };
 }
 
 export interface SettingsSaveInput {
   repos: RepoRef[];
+  reviewProvider: ReviewProvider;
   defaultDiffView: DiffViewMode;
   reviewTerminal: ReviewTerminal | null;
   aiProvider: AiProvider;
@@ -59,12 +65,14 @@ export interface SettingsSaveInput {
   notificationsEnabled: boolean;
   username: string;
   token: string;
+  githubToken: string;
   jiraToken: string;
   notionToken: string;
 }
 
 export interface SettingsFormProps {
   repos: RepoRef[];
+  reviewProvider: ReviewProvider;
   defaultDiffView: DiffViewMode;
   reviewTerminal: ReviewTerminal | null;
   aiProvider: AiProvider;
@@ -78,9 +86,14 @@ export interface SettingsFormProps {
   menuBarSyncEnabled: boolean;
   notificationsEnabled: boolean;
   hasCredentials: boolean;
+  hasGithubCredentials: boolean;
   hasJira: boolean;
   hasNotion: boolean;
-  onTestConnection: (username: string, token: string) => Promise<ConnectionUser>;
+  onTestConnection: (
+    provider: ReviewProvider,
+    username: string,
+    token: string,
+  ) => Promise<ConnectionUser>;
   onSave: (input: SettingsSaveInput) => Promise<void>;
   onCancel?: () => void;
   onSaved?: () => void;
@@ -98,6 +111,7 @@ export interface SettingsPageProps extends SettingsFormProps {
 
 function SettingsForm({
   repos: initialRepos,
+  reviewProvider: initialReviewProvider,
   defaultDiffView: initialDiffView,
   reviewTerminal: initialReviewTerminal,
   aiProvider: initialAiProvider,
@@ -111,6 +125,7 @@ function SettingsForm({
   menuBarSyncEnabled: initialMenuBarSyncEnabled,
   notificationsEnabled: initialNotificationsEnabled,
   hasCredentials,
+  hasGithubCredentials,
   hasJira,
   hasNotion,
   onTestConnection,
@@ -120,10 +135,14 @@ function SettingsForm({
   layout = "inline",
 }: SettingsFormProps) {
   const [repos, setRepos] = useState<RepoRef[]>(
-    initialRepos.length > 0 ? initialRepos : [{ workspace: "", repo: "" }],
+    initialRepos.length > 0
+      ? initialRepos.map(repoWithProvider)
+      : [{ provider: initialReviewProvider, workspace: "", repo: "" }],
   );
+  const [reviewProvider, setReviewProvider] = useState<ReviewProvider>(initialReviewProvider);
   const [username, setUsername] = useState("");
   const [token, setToken] = useState("");
+  const [githubToken, setGithubToken] = useState("");
   const [diffView, setDiffView] = useState<DiffViewMode>(initialDiffView);
   const [reviewTerminal, setReviewTerminal] = useState<ReviewTerminal | null>(
     initialReviewTerminal,
@@ -143,17 +162,28 @@ function SettingsForm({
   const [test, setTest] = useState<TestState>({ status: "idle" });
   const [saving, setSaving] = useState(false);
 
-  const canTest = username.trim().length > 0 && token.trim().length > 0;
+  const canTestBitbucket = username.trim().length > 0 && token.trim().length > 0;
+  const canTestGithub = githubToken.trim().length > 0;
+  const visibleRepoRows = repos
+    .map((repo, index) => ({ repo, index }))
+    .filter(({ repo }) => (repo.provider ?? "bitbucket") === reviewProvider);
+  const repositoryPanelTitle =
+    reviewProvider === "github" ? "GitHub repositories" : "Bitbucket repositories";
+  const repositoryOwnerLabel = reviewProvider === "github" ? "Owner / organization" : "Workspace";
 
   function updateRepo(index: number, patch: Partial<RepoRef>) {
     setRepos((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
   async function handleTest() {
-    if (!canTest) return;
+    if (reviewProvider === "bitbucket" && !canTestBitbucket) return;
+    if (reviewProvider === "github" && !canTestGithub) return;
     setTest({ status: "testing" });
     try {
-      const user = await onTestConnection(username.trim(), token.trim());
+      const user =
+        reviewProvider === "github"
+          ? await onTestConnection("github", "", githubToken.trim())
+          : await onTestConnection("bitbucket", username.trim(), token.trim());
       setTest({ status: "ok", name: user.displayName || "connected" });
     } catch (e) {
       setTest({ status: "error", message: e instanceof Error ? e.message : String(e) });
@@ -169,6 +199,7 @@ function SettingsForm({
         const repoName = repo.repo.trim();
         if (!workspace || !repoName) continue;
         cleaned.push({
+          provider: repo.provider ?? "bitbucket",
           workspace,
           repo: repoName,
           localPath: repo.localPath?.trim() || null,
@@ -176,6 +207,7 @@ function SettingsForm({
       }
       await onSave({
         repos: cleaned,
+        reviewProvider,
         defaultDiffView: diffView,
         reviewTerminal,
         aiProvider,
@@ -189,6 +221,7 @@ function SettingsForm({
         notificationsEnabled,
         username: username.trim(),
         token: token.trim(),
+        githubToken: githubToken.trim(),
         jiraToken: jiraToken.trim(),
         notionToken: notionToken.trim(),
       });
@@ -202,18 +235,35 @@ function SettingsForm({
 
   const fields = (
     <div className="grid gap-4">
+      <div className="grid gap-1.5 md:max-w-xs">
+        <Label htmlFor="settings-review-provider">Review provider</Label>
+        <select
+          id="settings-review-provider"
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+          value={reviewProvider}
+          onChange={(event) => setReviewProvider(event.target.value as ReviewProvider)}
+        >
+          <option value="bitbucket">Bitbucket</option>
+          <option value="github">GitHub</option>
+        </select>
+      </div>
+
       <div className="grid gap-1.5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <Label>Repositories</Label>
+            <Label>{repositoryPanelTitle}</Label>
             <p className="mt-1 text-xs text-muted-foreground">
-              Local clone paths are used for Claude fix, branch sync, commit, push, fetch, and pull.
+              {reviewProvider === "github"
+                ? "Configure GitHub owner or organization repositories. Bitbucket repositories stay in their own panel."
+                : "Configure Bitbucket workspace repositories. GitHub repositories stay in their own panel."}
             </p>
           </div>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setRepos((prev) => [...prev, { workspace: "", repo: "" }])}
+            onClick={() =>
+              setRepos((prev) => [...prev, { provider: reviewProvider, workspace: "", repo: "" }])
+            }
           >
             <Plus size={14} /> Add row
           </Button>
@@ -222,36 +272,39 @@ function SettingsForm({
           <table className="w-full border-collapse text-left text-sm">
             <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="w-[18%] px-3 py-2 font-medium">Workspace</th>
+                <th className="w-[24%] px-3 py-2 font-medium">{repositoryOwnerLabel}</th>
                 <th className="w-[24%] px-3 py-2 font-medium">Repository</th>
                 <th className="px-3 py-2 font-medium">Local path</th>
                 <th className="w-[92px] px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {repos.map((r, i) => (
-                <tr key={repoRowKey(r, i)} className="border-t border-border align-top">
+              {visibleRepoRows.map(({ repo: r, index: originalIndex }, visibleIndex) => (
+                <tr
+                  key={repoRowKey(r, originalIndex)}
+                  className="border-t border-border align-top"
+                >
                   <td className="px-3 py-2">
                     <Input
-                      aria-label={`Workspace ${i + 1}`}
+                      aria-label={`${repositoryOwnerLabel} ${visibleIndex + 1}`}
                       value={r.workspace}
-                      onChange={(e) => updateRepo(i, { workspace: e.target.value })}
-                      placeholder="workspace"
+                      onChange={(e) => updateRepo(originalIndex, { workspace: e.target.value })}
+                      placeholder={reviewProvider === "github" ? "owner or org" : "workspace"}
                     />
                   </td>
                   <td className="px-3 py-2">
                     <Input
-                      aria-label={`Repository ${i + 1}`}
+                      aria-label={`Repository ${visibleIndex + 1}`}
                       value={r.repo}
-                      onChange={(e) => updateRepo(i, { repo: e.target.value })}
+                      onChange={(e) => updateRepo(originalIndex, { repo: e.target.value })}
                       placeholder="repository"
                     />
                   </td>
                   <td className="px-3 py-2">
                     <Input
-                      aria-label={`Local path ${i + 1}`}
+                      aria-label={`Local path ${visibleIndex + 1}`}
                       value={r.localPath ?? ""}
-                      onChange={(e) => updateRepo(i, { localPath: e.target.value })}
+                      onChange={(e) => updateRepo(originalIndex, { localPath: e.target.value })}
                       placeholder="/absolute/path/to/local/clone"
                     />
                   </td>
@@ -259,41 +312,72 @@ function SettingsForm({
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label={`Remove repository ${i + 1}`}
-                      onClick={() => setRepos((prev) => prev.filter((_, idx) => idx !== i))}
+                      aria-label={`Remove repository ${visibleIndex + 1}`}
+                      onClick={() =>
+                        setRepos((prev) => prev.filter((_, idx) => idx !== originalIndex))
+                      }
                     >
                       <Trash size={14} />
                     </Button>
                   </td>
                 </tr>
               ))}
+              {visibleRepoRows.length === 0 && (
+                <tr className="border-t border-border">
+                  <td colSpan={4} className="px-3 py-4 text-sm text-muted-foreground">
+                    No {reviewProvider === "github" ? "GitHub" : "Bitbucket"} repositories
+                    configured.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      <div className="grid gap-1.5">
-        <Label htmlFor="settings-username">Atlassian email</Label>
-        <Input
-          id="settings-username"
-          type="email"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="you@example.com"
-          autoComplete="off"
-        />
-      </div>
+      <div className="grid gap-3 rounded-md border border-border p-3">
+        <div className="grid gap-1.5">
+          <Label>Provider credentials</Label>
+          <p className="text-xs text-muted-foreground">
+            Bitbucket and GitHub tokens are stored separately in the local keychain.
+          </p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-1.5">
+            <Label htmlFor="settings-username">Atlassian email</Label>
+            <Input
+              id="settings-username"
+              type="email"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="off"
+            />
+          </div>
 
-      <div className="grid gap-1.5">
-        <Label htmlFor="settings-token">API token</Label>
-        <Input
-          id="settings-token"
-          type="password"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-          placeholder={hasCredentials ? "•••••••• (leave blank to keep current)" : "ATATT…"}
-          autoComplete="off"
-        />
+          <div className="grid gap-1.5">
+            <Label htmlFor="settings-token">Bitbucket API token</Label>
+            <Input
+              id="settings-token"
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder={hasCredentials ? "•••••••• (leave blank to keep)" : "ATATT..."}
+              autoComplete="off"
+            />
+          </div>
+        </div>
+        <div className="grid gap-1.5 md:max-w-md">
+          <Label htmlFor="settings-github-token">GitHub token</Label>
+          <Input
+            id="settings-github-token"
+            type="password"
+            value={githubToken}
+            onChange={(e) => setGithubToken(e.target.value)}
+            placeholder={hasGithubCredentials ? "•••••••• (leave blank to keep)" : "github_pat_..."}
+            autoComplete="off"
+          />
+        </div>
       </div>
 
       <div className="grid gap-1.5">
@@ -524,10 +608,13 @@ function SettingsForm({
           variant="secondary"
           size="sm"
           onClick={handleTest}
-          disabled={!canTest || test.status === "testing"}
+          disabled={
+            test.status === "testing" ||
+            (reviewProvider === "github" ? !canTestGithub : !canTestBitbucket)
+          }
         >
           {test.status === "testing" && <CircleNotch size={14} className="animate-spin" />}
-          Test connection
+          Test {reviewProvider === "github" ? "GitHub" : "Bitbucket"} connection
         </Button>
         <TestStatus test={test} />
       </div>
@@ -580,7 +667,13 @@ function SettingsForm({
 
 export function SettingsPage({ onBack, ...props }: SettingsPageProps) {
   const formKey = [
-    props.repos.map((repo) => `${repo.workspace}/${repo.repo}/${repo.localPath ?? ""}`).join("|"),
+    props.reviewProvider,
+    props.repos
+      .map(
+        (repo) =>
+          `${repo.provider ?? "bitbucket"}:${repo.workspace}/${repo.repo}/${repo.localPath ?? ""}`,
+      )
+      .join("|"),
     props.defaultDiffView,
     props.reviewTerminal ?? "",
     props.aiProvider,
@@ -610,7 +703,7 @@ export function SettingsPage({ onBack, ...props }: SettingsPageProps) {
         <div className="min-w-0 flex-1">
           <span className="text-sm font-semibold">Settings</span>
           <span className="ml-2 text-xs text-muted-foreground">
-            Repositories, credentials, and review defaults
+            Providers, repositories, credentials, and review defaults
           </span>
         </div>
       </div>
@@ -628,7 +721,7 @@ export function SettingsDialog({ open, onOpenChange, ...props }: SettingsDialogP
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Track one or more Bitbucket Cloud repositories. One account token covers them all.
+            Track Bitbucket Cloud and GitHub repositories with separate local credentials.
           </DialogDescription>
         </DialogHeader>
         {open && (

@@ -59,6 +59,7 @@ pub fn has() -> bool {
 
 const ACCOUNT_JIRA: &str = "jira";
 const ACCOUNT_NOTION: &str = "notion";
+const ACCOUNT_GITHUB: &str = "github";
 
 fn entry_for(account: &str) -> Result<Entry, String> {
     Entry::new(SERVICE, account).map_err(|e| e.to_string())
@@ -112,4 +113,17 @@ pub fn clear_notion_token() -> Result<(), String> {
 }
 pub fn has_notion() -> bool {
     load_notion_token().is_some()
+}
+
+pub fn load_github_token() -> Option<String> {
+    load_token(ACCOUNT_GITHUB, "GITHUB_TOKEN")
+}
+pub fn store_github_token(token: &str) -> Result<(), String> {
+    store_token(ACCOUNT_GITHUB, token)
+}
+pub fn clear_github_token() -> Result<(), String> {
+    clear_token(ACCOUNT_GITHUB)
+}
+pub fn has_github() -> bool {
+    load_github_token().is_some()
 }

@@ -6,10 +6,20 @@ use serde::{Deserialize, Serialize};
 const APP_DIR: &str = "lachesi";
 const CONFIG_FILE: &str = "settings.json";
 
-/// A single Bitbucket repository the app tracks.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ReviewProvider {
+    #[default]
+    Bitbucket,
+    Github,
+}
+
+/// A single source-control repository the app tracks.
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoRef {
+    #[serde(default)]
+    pub provider: ReviewProvider,
     pub workspace: String,
     pub repo: String,
     #[serde(default)]
@@ -41,6 +51,8 @@ pub enum AiProvider {
 pub struct AppConfig {
     #[serde(default)]
     pub repos: Vec<RepoRef>,
+    #[serde(default)]
+    pub review_provider: ReviewProvider,
     pub default_diff_view: String,
     pub theme: String,
     #[serde(default)]
@@ -72,6 +84,8 @@ pub struct AppConfig {
     #[serde(default, skip_serializing)]
     pub has_credentials: bool,
     #[serde(default, skip_serializing)]
+    pub has_github_credentials: bool,
+    #[serde(default, skip_serializing)]
     pub has_jira: bool,
     #[serde(default, skip_serializing)]
     pub has_notion: bool,
@@ -86,6 +100,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             repos: Vec::new(),
+            review_provider: ReviewProvider::Bitbucket,
             default_diff_view: "unified".to_string(),
             theme: "dark".to_string(),
             review_terminal: None,
@@ -100,6 +115,7 @@ impl Default for AppConfig {
             notifications_enabled: false,
             configured: false,
             has_credentials: false,
+            has_github_credentials: false,
             has_jira: false,
             has_notion: false,
             workspace: None,
@@ -137,6 +153,7 @@ pub fn load() -> AppConfig {
         if let (Some(ws), Some(repo)) = (cfg.workspace.clone(), cfg.repo.clone()) {
             if !ws.is_empty() && !repo.is_empty() {
                 cfg.repos.push(RepoRef {
+                    provider: ReviewProvider::Bitbucket,
                     workspace: ws,
                     repo,
                     local_path: None,
@@ -159,12 +176,13 @@ pub fn save(cfg: &AppConfig) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AiProvider, AppConfig};
+    use super::{AiProvider, AppConfig, ReviewProvider};
 
     #[test]
     fn serializes_codex_provider_settings_in_local_config_shape() {
         let config = AppConfig {
             ai_provider: AiProvider::Codex,
+            review_provider: ReviewProvider::Github,
             codex_model: Some("gpt-5-codex".to_string()),
             codex_effort: Some("high".to_string()),
             ..AppConfig::default()
@@ -172,11 +190,13 @@ mod tests {
 
         let json = serde_json::to_string(&config).expect("config should serialize");
         assert!(json.contains(r#""aiProvider":"codex""#));
+        assert!(json.contains(r#""reviewProvider":"github""#));
         assert!(json.contains(r#""codexModel":"gpt-5-codex""#));
         assert!(json.contains(r#""codexEffort":"high""#));
 
         let parsed: AppConfig = serde_json::from_str(&json).expect("config should deserialize");
         assert_eq!(parsed.ai_provider, AiProvider::Codex);
+        assert_eq!(parsed.review_provider, ReviewProvider::Github);
         assert_eq!(parsed.codex_model.as_deref(), Some("gpt-5-codex"));
         assert_eq!(parsed.codex_effort.as_deref(), Some("high"));
     }

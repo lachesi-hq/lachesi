@@ -1,14 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { tauriCall } from "@/lib/tauri";
-import type { DraftComment, PrComment } from "@/types";
+import type { DraftComment, PrComment, ReviewProvider } from "@/types";
 
-function storageKey(workspace: string, repo: string, prId: number): string {
-  return `lachesi.drafts.${workspace}/${repo}/${prId}`;
+function storageKey(
+  provider: ReviewProvider,
+  workspace: string,
+  repo: string,
+  prId: number,
+): string {
+  return `lachesi.drafts.${provider}:${workspace}/${repo}/${prId}`;
 }
 
-function loadDrafts(workspace: string, repo: string, prId: number): DraftComment[] {
+function loadDrafts(
+  provider: ReviewProvider,
+  workspace: string,
+  repo: string,
+  prId: number,
+): DraftComment[] {
   try {
-    const raw = localStorage.getItem(storageKey(workspace, repo, prId));
+    const raw = localStorage.getItem(storageKey(provider, workspace, repo, prId));
     return raw ? (JSON.parse(raw) as DraftComment[]) : [];
   } catch {
     return [];
@@ -64,6 +74,7 @@ function materializeDraft(prId: number, draft: NewDraft, index: number): DraftCo
 }
 
 async function publishDraftToServer(
+  provider: ReviewProvider,
   workspace: string,
   repo: string,
   prId: number,
@@ -71,6 +82,7 @@ async function publishDraftToServer(
 ): Promise<PrComment> {
   if (draft.parentId != null) {
     return tauriCall<PrComment>("create_general_comment", {
+      provider,
       workspace,
       repo,
       id: prId,
@@ -80,6 +92,7 @@ async function publishDraftToServer(
   }
 
   return tauriCall<PrComment>("create_inline_comment", {
+    provider,
     workspace,
     repo,
     id: prId,
@@ -98,6 +111,7 @@ async function publishDraftToServer(
  * repo + PR) and published in a batch to the owning repo.
  */
 export function useDraftComments(
+  provider: ReviewProvider | null,
   workspace: string | null,
   repo: string | null,
   prId: number | null,
@@ -108,20 +122,20 @@ export function useDraftComments(
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
   const { onDraftPublished, onDraftRemoved, onDraftsDiscarded } = options;
 
-  const active = workspace != null && repo != null && prId != null;
+  const active = provider != null && workspace != null && repo != null && prId != null;
 
   useEffect(() => {
-    setDrafts(active ? loadDrafts(workspace, repo, prId) : []);
-  }, [active, workspace, repo, prId]);
+    setDrafts(active ? loadDrafts(provider, workspace, repo, prId) : []);
+  }, [active, provider, workspace, repo, prId]);
 
   useEffect(() => {
     if (!active) return;
     try {
-      localStorage.setItem(storageKey(workspace, repo, prId), JSON.stringify(drafts));
+      localStorage.setItem(storageKey(provider, workspace, repo, prId), JSON.stringify(drafts));
     } catch {
       // ignore storage failures
     }
-  }, [drafts, active, workspace, repo, prId]);
+  }, [drafts, active, provider, workspace, repo, prId]);
 
   const addDraft = useCallback(
     (draft: NewDraft) => {
@@ -184,7 +198,7 @@ export function useDraftComments(
       setPublishing(true);
       setPublishingDraftId(localId);
       try {
-        const comment = await publishDraftToServer(workspace, repo, prId, draft);
+        const comment = await publishDraftToServer(provider, workspace, repo, prId, draft);
         setDrafts((prev) => prev.filter((candidate) => candidate.localId !== localId));
         if (onDraftPublished) {
           void Promise.resolve(onDraftPublished(draft, comment));
@@ -201,7 +215,7 @@ export function useDraftComments(
         setPublishing(false);
       }
     },
-    [active, workspace, repo, prId, drafts, onDraftPublished],
+    [active, provider, workspace, repo, prId, drafts, onDraftPublished],
   );
 
   const publishAll = useCallback(async (): Promise<PublishResult> => {
@@ -212,7 +226,7 @@ export function useDraftComments(
     for (const draft of [...drafts]) {
       setPublishingDraftId(draft.localId);
       try {
-        const comment = await publishDraftToServer(workspace, repo, prId, draft);
+        const comment = await publishDraftToServer(provider, workspace, repo, prId, draft);
         published += 1;
         setDrafts((prev) => prev.filter((d) => d.localId !== draft.localId));
         if (onDraftPublished) {
@@ -225,7 +239,7 @@ export function useDraftComments(
     setPublishingDraftId(null);
     setPublishing(false);
     return { published, failed };
-  }, [active, workspace, repo, prId, drafts, onDraftPublished]);
+  }, [active, provider, workspace, repo, prId, drafts, onDraftPublished]);
 
   return {
     drafts,

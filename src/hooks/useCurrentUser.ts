@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { tauriCall } from "@/lib/tauri";
+import type { ReviewProvider } from "@/types";
 
 export interface CurrentUser {
   displayName: string;
@@ -7,7 +8,7 @@ export interface CurrentUser {
 }
 
 /** Loads the authenticated Bitbucket account (for the "mine" author filter). */
-export function useCurrentUser(enabled: boolean): CurrentUser | null {
+export function useCurrentUser(enabled: boolean, provider: ReviewProvider): CurrentUser | null {
   const [user, setUser] = useState<CurrentUser | null>(null);
 
   useEffect(() => {
@@ -16,7 +17,7 @@ export function useCurrentUser(enabled: boolean): CurrentUser | null {
       return;
     }
     let cancelled = false;
-    tauriCall<CurrentUser>("get_current_user")
+    tauriCall<CurrentUser>("get_current_user", { provider })
       .then((u) => {
         if (!cancelled) setUser(u);
       })
@@ -26,7 +27,7 @@ export function useCurrentUser(enabled: boolean): CurrentUser | null {
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, provider]);
 
   return user;
 }

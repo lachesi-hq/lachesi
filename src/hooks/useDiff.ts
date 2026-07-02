@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { type FileData, parseUnifiedDiff } from "@/lib/diff";
 import { tauriCall } from "@/lib/tauri";
+import type { ReviewProvider } from "@/types";
 
 interface UseDiffResult {
   files: FileData[];
@@ -11,6 +12,7 @@ interface UseDiffResult {
 
 /** Loads a PR's raw unified diff and parses it (memoized) into files. */
 export function useDiff(
+  provider: ReviewProvider | null,
   workspace: string | null,
   repo: string | null,
   prId: number | null,
@@ -28,7 +30,7 @@ export function useDiff(
     let cancelled = false;
     setLoading(true);
     setError(null);
-    tauriCall<string>("get_pr_diff", { workspace, repo, id: prId })
+    tauriCall<string>("get_pr_diff", { provider, workspace, repo, id: prId })
       .then((d) => {
         if (!cancelled) setRaw(d);
       })
@@ -41,7 +43,7 @@ export function useDiff(
     return () => {
       cancelled = true;
     };
-  }, [workspace, repo, prId]);
+  }, [provider, workspace, repo, prId]);
 
   const files = useMemo(() => parseUnifiedDiff(raw), [raw]);
 
