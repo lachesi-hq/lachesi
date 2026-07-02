@@ -7,6 +7,8 @@ const SNAPSHOT_STORAGE_KEY = "lachesi.menuBar.prSnapshot.v1";
 const TRAY_ID = "lachesi-main";
 const MAX_MENU_PRS = 8;
 const MAX_NOTIFICATIONS_PER_SYNC = 3;
+const MENU_TITLE_LIMIT = 46;
+const MENU_BRANCH_LIMIT = 38;
 
 interface PrSnapshotEntry {
   title: string;
@@ -36,8 +38,37 @@ function prKey(pr: PullRequestSummary): string {
 }
 
 function formatPrMenuLabel(pr: PullRequestSummary): string {
-  const title = pr.title.length > 52 ? `${pr.title.slice(0, 49)}...` : pr.title;
-  return `#${pr.id} ${title} (${pr.repo})`;
+  return `#${pr.id} ${truncateMenuText(pr.title, MENU_TITLE_LIMIT)} (${pr.repo})`;
+}
+
+function truncateMenuText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function stateSymbol(pr: PullRequestSummary): string {
+  if (pr.draft) return "◌";
+  if (pr.state === "MERGED") return "✓";
+  if (pr.state === "DECLINED" || pr.state === "SUPERSEDED") return "×";
+  return "●";
+}
+
+function formatStatusLabel(args: UseMenuBarPrSyncArgs, latestPrs: PullRequestSummary[]) {
+  if (!args.menuBarSyncEnabled) return "○ Pull request sync disabled";
+  if (args.loading) return "↻ Syncing pull requests...";
+  if (args.reviewingPrKey) return "▶ Background review running";
+  return `● Idle · ${latestPrs.length} latest PR${latestPrs.length === 1 ? "" : "s"}`;
+}
+
+function formatPrStateLabel(pr: PullRequestSummary): string {
+  const state = pr.draft ? "Draft" : pr.state.toLowerCase();
+  const comments = `${pr.commentCount} comment${pr.commentCount === 1 ? "" : "s"}`;
+  return `${state} · ${comments}`;
+}
+
+function findReviewingPr(args: UseMenuBarPrSyncArgs, latestPrs: PullRequestSummary[]) {
+  if (!args.reviewingPrKey) return null;
+  return latestPrs.find((pr) => prKey(pr) === args.reviewingPrKey) ?? null;
 }
 
 function prMenuId(pr: PullRequestSummary): string {
@@ -133,7 +164,20 @@ async function updateTrayMenu(args: UseMenuBarPrSyncArgs, latestPrs: PullRequest
   if (!trayRef) return;
 
   const { Menu } = await import("@tauri-apps/api/menu");
+  const newestPr = latestPrs[0] ?? null;
+  const reviewingPr = findReviewingPr(args, latestPrs);
+  const canRunQuickReview = Boolean(
+    args.menuBarSyncEnabled && args.onReviewPr && newestPr && !args.reviewingPrKey,
+  );
   const items = [
+    {
+      id: "status",
+      text: formatStatusLabel(args, latestPrs),
+      enabled: false,
+    },
+    {
+      item: "Separator" as const,
+    },
     {
       id: "open",
       text: "Open Lachesi",
@@ -143,7 +187,7 @@ async function updateTrayMenu(args: UseMenuBarPrSyncArgs, latestPrs: PullRequest
     },
     {
       id: "sync",
-      text: args.loading ? "Syncing pull requests..." : "Sync pull requests",
+      text: args.loading ? "↻ Syncing pull requests..." : "↻ Sync pull requests",
       enabled: args.menuBarSyncEnabled && !args.loading,
       action: () => {
         if (!args.menuBarSyncEnabled) return;
@@ -151,34 +195,89 @@ async function updateTrayMenu(args: UseMenuBarPrSyncArgs, latestPrs: PullRequest
       },
     },
     {
-      id: "latest-heading",
-      text: latestPrs.length === 0 ? "No pull requests loaded" : "Latest pull requests",
-      enabled: false,
+      id: "open-latest",
+      text: newestPr ? `Open latest: #${newestPr.id}` : "Open latest PR",
+      enabled: Boolean(newestPr),
+      action: () => {
+        if (!newestPr) return;
+        void focusMainWindow().finally(() => args.onOpenPr(newestPr));
+      },
     },
-    ...latestPrs.flatMap((pr) => {
-      const key = prKey(pr);
-      const reviewing = args.reviewingPrKey === key;
-      const items = [
-        {
-          id: prMenuId(pr),
-          text: formatPrMenuLabel(pr),
-          action: () => {
-            void focusMainWindow().finally(() => args.onOpenPr(pr));
-          },
-        },
-      ];
-      if (args.onReviewPr) {
-        items.push({
-          id: `review-${prMenuId(pr)}`,
-          text: reviewing ? `Reviewing #${pr.id}...` : `Review #${pr.id} in background`,
-          action: () => {
-            if (reviewing || !args.onReviewPr) return;
-            void args.onReviewPr(pr);
-          },
-        });
-      }
-      return items;
-    }),
+    {
+      id: "review-latest",
+      text: reviewingPr
+        ? `▶ Reviewing #${reviewingPr.id}...`
+        : newestPr
+          ? `▶ Review latest: #${newestPr.id}`
+          : "▶ Review latest PR",
+      enabled: canRunQuickReview,
+      action: () => {
+        if (!canRunQuickReview || !newestPr || !args.onReviewPr) return;
+        void args.onReviewPr(newestPr);
+      },
+    },
+    {
+      item: "Separator" as const,
+    },
+    {
+      id: "pull-requests",
+      text: latestPrs.length === 0 ? "Pull requests" : `Pull requests (${latestPrs.length})`,
+      enabled: latestPrs.length > 0,
+      items:
+        latestPrs.length === 0
+          ? [
+              {
+                id: "no-pull-requests",
+                text: "No pull requests loaded",
+                enabled: false,
+              },
+            ]
+          : latestPrs.map((pr) => {
+              const key = prKey(pr);
+              const reviewing = args.reviewingPrKey === key;
+              const baseId = prMenuId(pr);
+              return {
+                id: `actions-${baseId}`,
+                text: `${reviewing ? "▶" : stateSymbol(pr)} ${formatPrMenuLabel(pr)}`,
+                items: [
+                  {
+                    id: baseId,
+                    text: "Open PR",
+                    action: () => {
+                      void focusMainWindow().finally(() => args.onOpenPr(pr));
+                    },
+                  },
+                  {
+                    id: `review-${baseId}`,
+                    text: reviewing ? "Review running..." : "Review in background",
+                    enabled: Boolean(args.onReviewPr) && !reviewing && !args.reviewingPrKey,
+                    action: () => {
+                      if (reviewing || args.reviewingPrKey || !args.onReviewPr) return;
+                      void args.onReviewPr(pr);
+                    },
+                  },
+                  {
+                    item: "Separator" as const,
+                  },
+                  {
+                    id: `meta-state-${baseId}`,
+                    text: formatPrStateLabel(pr),
+                    enabled: false,
+                  },
+                  {
+                    id: `meta-author-${baseId}`,
+                    text: `Author: ${pr.authorDisplayName}`,
+                    enabled: false,
+                  },
+                  {
+                    id: `meta-branch-${baseId}`,
+                    text: `Branch: ${truncateMenuText(pr.sourceBranch, MENU_BRANCH_LIMIT)}`,
+                    enabled: false,
+                  },
+                ],
+              };
+            }),
+    },
   ];
 
   const menu = await Menu.new({ items });
