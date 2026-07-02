@@ -8,7 +8,7 @@ mod review_storage;
 
 use commands::{bitbucket, context, repositories, review};
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
@@ -16,16 +16,29 @@ use tauri::{
 const TRAY_ID: &str = "lachesi-main";
 
 fn setup_menu_bar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let status = MenuItem::with_id(app, "status", "● Starting Lachesi...", false, None::<&str>)?;
+    let separator_top = PredefinedMenuItem::separator(app)?;
     let open = MenuItem::with_id(app, "open", "Open Lachesi", true, None::<&str>)?;
-    let sync = MenuItem::with_id(app, "sync", "Sync pull requests", true, None::<&str>)?;
+    let sync = MenuItem::with_id(app, "sync", "↻ Sync pull requests", true, None::<&str>)?;
+    let separator_pull_requests = PredefinedMenuItem::separator(app)?;
     let loading = MenuItem::with_id(
         app,
         "latest-heading",
-        "Loading pull requests...",
+        "Pull requests loading...",
         false,
         None::<&str>,
     )?;
-    let menu = Menu::with_items(app, &[&open, &sync, &loading])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &status,
+            &separator_top,
+            &open,
+            &sync,
+            &separator_pull_requests,
+            &loading,
+        ],
+    )?;
     let icon = app.default_window_icon().cloned();
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)

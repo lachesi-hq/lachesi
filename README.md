@@ -214,6 +214,18 @@ In the app settings, configure:
 - optional Jira base URL, Jira token, and Notion token;
 - menu-bar sync and desktop notifications.
 
+### Menu Bar Legend
+
+The macOS menu bar item uses compact status symbols:
+
+- `●` idle or normal open pull request;
+- `○` pull request sync disabled;
+- `◌` draft pull request;
+- `↻` sync running or sync action;
+- `▶` background review running or review action;
+- `✓` merged pull request;
+- `×` declined or superseded pull request.
+
 For development, `.env` fallbacks may be used by local code paths, but secrets should not be
 committed. See `SECURITY.md`.
 
