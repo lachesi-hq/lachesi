@@ -8,6 +8,7 @@ import type {
   BranchStatus,
   BranchSyncResult,
   PrComment,
+  PrFilePreview,
   PrListFilter,
   PullRequestPage,
   RepositoryBlameLine,
@@ -36,6 +37,13 @@ const mockFixStates = new Map<string, AiReviewFixState>();
 const mockReviewRunStates = new Map<string, AiReviewRunState>();
 const mockReviewRunTimers = new Map<string, number[]>();
 const mockBranchStatuses = new Map<string, BranchStatus>();
+const mockSvgPreview = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="180" viewBox="0 0 360 180">
+  <rect width="360" height="180" rx="16" fill="#111827"/>
+  <circle cx="90" cy="90" r="42" fill="#2dd4bf"/>
+  <rect x="160" y="58" width="140" height="18" rx="9" fill="#f8fafc"/>
+  <rect x="160" y="88" width="108" height="14" rx="7" fill="#94a3b8"/>
+  <rect x="160" y="114" width="78" height="14" rx="7" fill="#64748b"/>
+</svg>`;
 let mockReviewJobs: AiReviewJob[] = [
   {
     id: "job-1",
@@ -810,6 +818,20 @@ export const mockHandlers: Record<string, Handler> = {
     },
   get_diffstat: () => mockDiffstat,
   get_pr_diff: () => mockRawDiff,
+  get_pr_file_preview: (args) => {
+    const path = String(args?.path ?? "public/review-preview.svg");
+    const mimeType = path.toLowerCase().endsWith(".svg") ? "image/svg+xml" : "image/png";
+    const dataUrl =
+      mimeType === "image/svg+xml"
+        ? `data:image/svg+xml;base64,${btoa(mockSvgPreview)}`
+        : "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    return {
+      path,
+      mimeType,
+      dataUrl,
+      size: dataUrl.length,
+    } satisfies PrFilePreview;
+  },
   list_comments: () => mockComments,
 
   create_inline_comment: (args) => {

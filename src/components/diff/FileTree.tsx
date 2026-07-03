@@ -7,7 +7,8 @@ import {
   MagnifyingGlass,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
-import { countChanges, type FileData, fileDisplayPath, fileKey } from "@/lib/diff";
+import { fileDisplayPath, fileKey } from "@/lib/diff";
+import { countReviewFileChanges, type ReviewFileData } from "@/lib/imageDiff";
 import { cn } from "@/lib/utils";
 
 const STATUS_META: Record<string, { label: string; short: string; className: string }> = {
@@ -30,7 +31,7 @@ type FileNode = {
   type: "file";
   name: string;
   path: string;
-  file: FileData;
+  file: ReviewFileData;
 };
 
 type TreeNode = DirectoryNode | FileNode;
@@ -40,20 +41,20 @@ export type FileTreeFolderCommand = {
 };
 
 export interface FileTreeProps {
-  files: FileData[];
+  files: ReviewFileData[];
   activeFileKey?: string | null;
   viewedFileKeys?: Set<string>;
   className?: string;
   folderCommand?: FileTreeFolderCommand;
-  onSelect: (file: FileData) => void;
-  onToggleViewed?: (file: FileData) => void;
+  onSelect: (file: ReviewFileData) => void;
+  onToggleViewed?: (file: ReviewFileData) => void;
 }
 
 function createDirectory(name: string, path: string): DirectoryNode {
   return { type: "directory", name, path, children: [], childMap: new Map() };
 }
 
-function buildTree(files: FileData[]): TreeNode[] {
+function buildTree(files: ReviewFileData[]): TreeNode[] {
   const root = createDirectory("", "");
 
   for (const file of files) {
@@ -108,8 +109,8 @@ interface TreeRowsProps {
   activeFileKey?: string | null;
   viewedFileKeys?: Set<string>;
   collapsedDirectories: Set<string>;
-  onSelect: (file: FileData) => void;
-  onToggleViewed?: (file: FileData) => void;
+  onSelect: (file: ReviewFileData) => void;
+  onToggleViewed?: (file: ReviewFileData) => void;
   onToggleDirectory: (path: string) => void;
   forceExpanded?: boolean;
 }
@@ -160,7 +161,7 @@ function TreeRows({
           );
         }
 
-        const { additions, deletions } = countChanges(node.file);
+        const { additions, deletions } = countReviewFileChanges(node.file);
         const key = fileKey(node.file);
         const viewed = viewedFileKeys?.has(key) ?? false;
         const active = key === activeFileKey;

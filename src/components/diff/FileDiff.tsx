@@ -7,12 +7,15 @@ import {
   type ChangeData,
   changeNewLine,
   changeOldLine,
-  countChanges,
-  type FileData,
   fileAnchorId,
   fileDisplayPath,
 } from "@/lib/diff";
 import { tokenizeFile } from "@/lib/highlight";
+import {
+  countReviewFileChanges,
+  type ImageDiffMetadata,
+  type ReviewFileData,
+} from "@/lib/imageDiff";
 import type { DiffViewMode } from "@/types";
 
 type RenderableDiffViewMode = Exclude<DiffViewMode, "conversation">;
@@ -26,7 +29,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export interface FileDiffProps {
-  file: FileData;
+  file: ReviewFileData;
   viewType: RenderableDiffViewMode;
   viewed?: boolean;
   collapsed?: boolean;
@@ -35,11 +38,11 @@ export interface FileDiffProps {
   /** File-level comments rendered at the top of the file (not tied to a line). */
   fileComments?: ReactNode;
   /** Called when a line gutter is clicked, to open a comment composer. */
-  onGutterClick?: (file: FileData, args: ChangeEventArgs) => void;
+  onGutterClick?: (file: ReviewFileData, args: ChangeEventArgs) => void;
   /** Called when the AI gutter action is clicked for a specific diff line. */
-  onAskLine?: (file: FileData, args: ChangeEventArgs) => void;
-  onToggleViewed?: (file: FileData) => void;
-  onToggleCollapsed?: (file: FileData) => void;
+  onAskLine?: (file: ReviewFileData, args: ChangeEventArgs) => void;
+  onToggleViewed?: (file: ReviewFileData) => void;
+  onToggleCollapsed?: (file: ReviewFileData) => void;
 }
 
 interface GutterRenderOptions {
@@ -50,6 +53,49 @@ interface GutterRenderOptions {
 
 function hasLineForSide(change: ChangeData, side: "old" | "new"): boolean {
   return side === "old" ? changeOldLine(change) != null : changeNewLine(change) != null;
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ImagePreviewPanel({ image }: { image: ImageDiffMetadata }) {
+  const path = image.preview.preview?.path ?? image.path;
+  return (
+    <div className="border-b border-border bg-background px-4 py-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Badge variant="outline">{image.mimeType}</Badge>
+        <span>{image.previewSide === "old" ? "base image" : "new image"}</span>
+        {image.preview.status === "ready" && <span>{formatBytes(image.preview.preview.size)}</span>}
+      </div>
+      {image.preview.status === "loading" ? (
+        <div className="rounded-md border border-dashed border-border bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
+          Loading image preview...
+        </div>
+      ) : image.preview.status === "failed" ? (
+        <div className="rounded-md border border-dashed border-border bg-muted/30 px-4 py-8 text-center">
+          <p className="text-sm font-medium text-foreground">Image preview unavailable</p>
+          <p className="mt-1 text-xs text-muted-foreground">{image.preview.error}</p>
+        </div>
+      ) : image.preview.status === "ready" ? (
+        <div className="overflow-auto rounded-md border border-border bg-muted/20 p-3">
+          <img
+            src={image.preview.preview.dataUrl}
+            alt={path}
+            className="mx-auto max-h-[70vh] max-w-full object-contain"
+            loading="lazy"
+            decoding="async"
+          />
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-border bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
+          Image preview is not loaded yet.
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function FileDiff({
@@ -64,7 +110,7 @@ export function FileDiff({
   onToggleViewed,
   onToggleCollapsed,
 }: FileDiffProps) {
-  const { additions, deletions } = countChanges(file);
+  const { additions, deletions } = countReviewFileChanges(file);
   const tokens = useMemo(() => (collapsed ? undefined : tokenizeFile(file)), [file, collapsed]);
   const renderGutter =
     onGutterClick || onAskLine
@@ -156,12 +202,13 @@ export function FileDiff({
         </span>
       </header>
       {!collapsed && fileComments}
+      {!collapsed && file.imageDiff && <ImagePreviewPanel image={file.imageDiff} />}
       {!collapsed &&
-        (file.hunks.length === 0 ? (
+        (file.hunks.length === 0 && !file.imageDiff ? (
           <p className="px-3 py-2 text-xs text-muted-foreground">
-            No textual changes (binary or empty).
+            No textual changes. Binary preview is not supported for this file type.
           </p>
-        ) : (
+        ) : file.hunks.length > 0 ? (
           <Diff
             viewType={viewType}
             diffType={file.type}
@@ -172,7 +219,7 @@ export function FileDiff({
           >
             {(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}
           </Diff>
-        ))}
+        ) : null)}
     </section>
   );
 }

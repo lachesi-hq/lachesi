@@ -8,9 +8,9 @@ mod review_storage;
 
 use commands::{bitbucket, context, repositories, review};
 use tauri::{
+    Emitter, Manager,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager,
 };
 
 const TRAY_ID: &str = "lachesi-main";
@@ -111,6 +111,7 @@ pub fn run() {
             bitbucket::get_branch_status,
             bitbucket::get_diffstat,
             bitbucket::get_pr_diff,
+            bitbucket::get_pr_file_preview,
             bitbucket::list_comments,
             bitbucket::create_inline_comment,
             bitbucket::create_general_comment,
