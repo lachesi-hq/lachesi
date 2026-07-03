@@ -149,6 +149,54 @@ fn encode_path_segment(value: &str) -> String {
     out
 }
 
+fn encode_path(value: &str) -> String {
+    value
+        .split('/')
+        .map(encode_path_segment)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn image_mime_type(path: &str) -> Option<&'static str> {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        Some("image/png")
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        Some("image/jpeg")
+    } else if lower.ends_with(".svg") {
+        Some("image/svg+xml")
+    } else if lower.ends_with(".webp") {
+        Some("image/webp")
+    } else if lower.ends_with(".gif") {
+        Some("image/gif")
+    } else {
+        None
+    }
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        out.push(TABLE[(b0 >> 2) as usize] as char);
+        out.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(b2 & 0b0011_1111) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
 fn check(resp: reqwest::blocking::Response) -> Result<reqwest::blocking::Response, String> {
     let status = resp.status();
     if status.is_success() {
@@ -263,15 +311,22 @@ struct BbAuthor {
     account_id: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct BbBranch {
     #[serde(default)]
     name: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
+struct BbCommitRef {
+    #[serde(default)]
+    hash: String,
+}
+
+#[derive(Clone, Deserialize)]
 struct BbBranchRef {
     branch: Option<BbBranch>,
+    commit: Option<BbCommitRef>,
 }
 
 #[derive(Deserialize)]
@@ -474,6 +529,16 @@ struct GhFile {
 }
 
 #[derive(Deserialize)]
+struct GhContentFile {
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    encoding: String,
+    #[serde(default)]
+    size: usize,
+}
+
+#[derive(Deserialize)]
 struct GhReviewComment {
     id: u32,
     #[serde(default)]
@@ -566,6 +631,8 @@ pub struct PullRequestDetail {
     reviewers: Vec<Participant>,
     source_branch: String,
     destination_branch: String,
+    source_commit_hash: Option<String>,
+    destination_commit_hash: Option<String>,
     created_on: String,
     updated_on: String,
 }
@@ -578,6 +645,15 @@ pub struct DiffstatEntry {
     lines_removed: u32,
     old_path: Option<String>,
     new_path: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrFilePreview {
+    path: String,
+    mime_type: String,
+    data_url: String,
+    size: usize,
 }
 
 #[derive(Serialize)]
@@ -665,6 +741,16 @@ fn branch_name(r: Option<BbBranchRef>) -> String {
     r.and_then(|r| r.branch).map(|b| b.name).unwrap_or_default()
 }
 
+fn commit_hash(r: Option<BbBranchRef>) -> Option<String> {
+    r.and_then(|r| r.commit)
+        .map(|commit| commit.hash)
+        .filter(|hash| !hash.is_empty())
+}
+
+fn non_empty(value: String) -> Option<String> {
+    if value.is_empty() { None } else { Some(value) }
+}
+
 fn map_reviewers(participants: Vec<BbParticipant>) -> Vec<Participant> {
     participants
         .into_iter()
@@ -746,8 +832,10 @@ fn map_pr_detail(bb: BbPrDetail) -> PullRequestDetail {
         draft: bb.draft,
         author_display_name: bb.author.map(|a| a.display_name).unwrap_or_default(),
         reviewers,
-        source_branch: branch_name(bb.source),
-        destination_branch: branch_name(bb.destination),
+        source_branch: branch_name(bb.source.clone()),
+        destination_branch: branch_name(bb.destination.clone()),
+        source_commit_hash: commit_hash(bb.source),
+        destination_commit_hash: commit_hash(bb.destination),
         created_on: bb.created_on,
         updated_on: bb.updated_on,
     }
@@ -837,6 +925,8 @@ fn map_gh_pr_detail(pr: GhPullRequest) -> PullRequestDetail {
         reviewers: gh_reviewers(pr.requested_reviewers),
         source_branch: pr.head.r#ref,
         destination_branch: pr.base.r#ref,
+        source_commit_hash: non_empty(pr.head.sha),
+        destination_commit_hash: non_empty(pr.base.sha),
         created_on: pr.created_at,
         updated_on: pr.updated_at,
     }
@@ -1056,6 +1146,70 @@ fn fetch_diffstat_entries(
         }
     }
     Ok(out)
+}
+
+fn preview_from_bytes(path: String, mime_type: &str, bytes: Vec<u8>) -> PrFilePreview {
+    let encoded = base64_encode(&bytes);
+    PrFilePreview {
+        path,
+        mime_type: mime_type.to_string(),
+        data_url: format!("data:{mime_type};base64,{encoded}"),
+        size: bytes.len(),
+    }
+}
+
+fn fetch_bitbucket_file_preview(
+    client: &BitbucketClient,
+    workspace: &str,
+    repo: &str,
+    branch: &str,
+    path: &str,
+) -> Result<PrFilePreview, String> {
+    let mime_type = image_mime_type(path)
+        .ok_or_else(|| "Only PNG, JPEG, SVG, WebP, and GIF previews are supported.".to_string())?;
+    let url = format!(
+        "{}/src/{}/{}",
+        repo_base(workspace, repo)?,
+        encode_path_segment(branch),
+        encode_path(path)
+    );
+    let bytes = send_checked(client.get(&url))?
+        .bytes()
+        .map_err(|e| e.to_string())?
+        .to_vec();
+    Ok(preview_from_bytes(path.to_string(), mime_type, bytes))
+}
+
+fn fetch_github_file_preview(
+    client: &GithubClient,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    path: &str,
+) -> Result<PrFilePreview, String> {
+    let mime_type = image_mime_type(path)
+        .ok_or_else(|| "Only PNG, JPEG, SVG, WebP, and GIF previews are supported.".to_string())?;
+    let url = format!(
+        "{}/contents/{}?ref={}",
+        github_repo_base(owner, repo)?,
+        encode_path(path),
+        encode_path_segment(branch)
+    );
+    let content: GhContentFile = github_get_json(client.get(&url))?;
+    if !content.encoding.eq_ignore_ascii_case("base64") {
+        return Err("GitHub returned an unsupported file encoding.".to_string());
+    }
+    let encoded: String = content
+        .content
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect();
+    Ok(PrFilePreview {
+        path: path.to_string(),
+        mime_type: mime_type.to_string(),
+        data_url: format!("data:{mime_type};base64,{encoded}"),
+        size: content.size,
+    })
 }
 
 fn fetch_github_pull_requests_page(
@@ -1641,6 +1795,40 @@ pub async fn get_pr_diff(
     .await
 }
 
+#[tauri::command]
+pub async fn get_pr_file_preview(
+    provider: Option<ReviewProvider>,
+    workspace: String,
+    repo: String,
+    id: u32,
+    path: String,
+    side: String,
+) -> Result<PrFilePreview, String> {
+    run(move || match provider_for(provider, &workspace, &repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            let pr = fetch_pull_request_detail(&client, &workspace, &repo, id)?;
+            let reference = if side == "old" {
+                pr.destination_commit_hash.unwrap_or(pr.destination_branch)
+            } else {
+                pr.source_commit_hash.unwrap_or(pr.source_branch)
+            };
+            fetch_bitbucket_file_preview(&client, &workspace, &repo, &reference, &path)
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            let pr = fetch_github_pull_request_detail(&client, &workspace, &repo, id)?;
+            let reference = if side == "old" {
+                pr.destination_commit_hash.unwrap_or(pr.destination_branch)
+            } else {
+                pr.source_commit_hash.unwrap_or(pr.source_branch)
+            };
+            fetch_github_file_preview(&client, &workspace, &repo, &reference, &path)
+        }
+    })
+    .await
+}
+
 // ---------------------------------------------------------------------------
 // Commands — comments
 // ---------------------------------------------------------------------------
@@ -1891,6 +2079,45 @@ mod tests {
                 "title ~ \"quote slash\" AND updated_on >= \"2026-06-01T00:00:00.000Z\""
                     .to_string(),
             ),
+        );
+    }
+
+    #[test]
+    fn pr_detail_keeps_branch_name_and_commit_hash() {
+        let detail = map_pr_detail(BbPrDetail {
+            id: 42,
+            title: "Visual assets".to_string(),
+            description: String::new(),
+            state: "OPEN".to_string(),
+            draft: false,
+            author: None,
+            source: Some(BbBranchRef {
+                branch: Some(BbBranch {
+                    name: "feature/assets-update".to_string(),
+                }),
+                commit: Some(BbCommitRef {
+                    hash: "source-sha".to_string(),
+                }),
+            }),
+            destination: Some(BbBranchRef {
+                branch: Some(BbBranch {
+                    name: "develop".to_string(),
+                }),
+                commit: Some(BbCommitRef {
+                    hash: "destination-sha".to_string(),
+                }),
+            }),
+            created_on: String::new(),
+            updated_on: String::new(),
+            participants: Vec::new(),
+        });
+
+        assert_eq!(detail.source_branch, "feature/assets-update");
+        assert_eq!(detail.source_commit_hash.as_deref(), Some("source-sha"));
+        assert_eq!(detail.destination_branch, "develop");
+        assert_eq!(
+            detail.destination_commit_hash.as_deref(),
+            Some("destination-sha")
         );
     }
 }

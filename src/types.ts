@@ -123,6 +123,8 @@ export interface PullRequestDetail {
   reviewers: Participant[];
   sourceBranch: string;
   destinationBranch: string;
+  sourceCommitHash?: string | null;
+  destinationCommitHash?: string | null;
   createdOn: string;
   updatedOn: string;
 }
@@ -427,6 +429,13 @@ export interface DiffstatEntry {
   linesRemoved: number;
   oldPath: string | null;
   newPath: string | null;
+}
+
+export interface PrFilePreview {
+  path: string;
+  mimeType: string;
+  dataUrl: string;
+  size: number;
 }
 
 export interface InlineAnchor {

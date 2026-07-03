@@ -3,7 +3,8 @@ import "./diff-theme.css";
 import { CaretDown } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import type { ChangeEventArgs } from "react-diff-view";
-import { countChanges, type FileData, fileAnchorId, fileKey } from "@/lib/diff";
+import { fileAnchorId, fileKey } from "@/lib/diff";
+import { countReviewFileChanges, type ReviewFileData } from "@/lib/imageDiff";
 import type { DiffViewMode } from "@/types";
 import { DiffViewToggle } from "./DiffViewToggle";
 import { FileDiff } from "./FileDiff";
@@ -11,17 +12,17 @@ import { FileTree, type FileTreeFolderCommand } from "./FileTree";
 
 type RenderableDiffViewMode = Exclude<DiffViewMode, "conversation">;
 
-function startsCollapsed(file: FileData): boolean {
-  const { additions, deletions } = countChanges(file);
+function startsCollapsed(file: ReviewFileData): boolean {
+  const { additions, deletions } = countReviewFileChanges(file);
   return additions + deletions > 500;
 }
 
-function initialCollapsedFileKeys(files: FileData[]): Set<string> {
+function initialCollapsedFileKeys(files: ReviewFileData[]): Set<string> {
   return new Set(files.filter(startsCollapsed).map(fileKey));
 }
 
 export interface DiffViewerProps {
-  files: FileData[];
+  files: ReviewFileData[];
   viewMode: RenderableDiffViewMode;
   onViewModeChange: (mode: DiffViewMode) => void;
   loading?: boolean;
@@ -31,11 +32,11 @@ export interface DiffViewerProps {
   /** Per-file file-level comment block, keyed by fileKey. */
   fileWidgets?: Record<string, ReactNode>;
   viewedFileKeys?: Set<string>;
-  onToggleFileViewed?: (file: FileData) => void;
+  onToggleFileViewed?: (file: ReviewFileData) => void;
   /** Called when a line gutter is clicked, to open a comment composer. */
-  onGutterClick?: (file: FileData, args: ChangeEventArgs) => void;
+  onGutterClick?: (file: ReviewFileData, args: ChangeEventArgs) => void;
   /** Called when the AI gutter action is clicked for a diff line. */
-  onAskLine?: (file: FileData, args: ChangeEventArgs) => void;
+  onAskLine?: (file: ReviewFileData, args: ChangeEventArgs) => void;
 }
 
 export function DiffViewer({
@@ -106,14 +107,14 @@ export function DiffViewer({
     return () => observer.disconnect();
   }, [fileKeysByAnchorId]);
 
-  const scrollToFile = (file: FileData) => {
+  const scrollToFile = (file: ReviewFileData) => {
     setActiveFileKey(fileKey(file));
     document
       .getElementById(fileAnchorId(file))
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const handleToggleFileCollapsed = (file: FileData) => {
+  const handleToggleFileCollapsed = (file: ReviewFileData) => {
     const key = fileKey(file);
     setCollapsedFileKeys((previous) => {
       const next = new Set(previous);
@@ -123,7 +124,7 @@ export function DiffViewer({
     });
   };
 
-  const handleToggleFileViewed = (file: FileData) => {
+  const handleToggleFileViewed = (file: ReviewFileData) => {
     const key = fileKey(file);
     const currentlyViewed = viewedFileKeys?.has(key) ?? false;
     onToggleFileViewed?.(file);
@@ -160,7 +161,7 @@ export function DiffViewer({
 
   const totals = files.reduce(
     (acc, file) => {
-      const { additions, deletions } = countChanges(file);
+      const { additions, deletions } = countReviewFileChanges(file);
       acc.additions += additions;
       acc.deletions += deletions;
       return acc;

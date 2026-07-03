@@ -122,6 +122,8 @@ export const mockPullRequestDetail: PullRequestDetail = {
   ],
   sourceBranch: "CB-2066-category-drilldown",
   destinationBranch: "develop",
+  sourceCommitHash: "mock-source-commit",
+  destinationCommitHash: "mock-destination-commit",
   createdOn: "2026-06-16T09:00:00.000Z",
   updatedOn: "2026-06-16T15:40:00.000Z",
 };
@@ -147,6 +149,13 @@ export const mockDiffstat: DiffstatEntry[] = [
     linesRemoved: 0,
     oldPath: null,
     newPath: "src/app/dashboard/budget/types/BudgetAnalyticsItem.ts",
+  },
+  {
+    status: "modified",
+    linesAdded: 0,
+    linesRemoved: 0,
+    oldPath: "public/review-preview.svg",
+    newPath: "public/review-preview.svg",
   },
 ];
 
