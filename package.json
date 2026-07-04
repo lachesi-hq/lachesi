@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006",
+    "storybook:build": "storybook build --output-dir storybook-static",
     "build-storybook": "storybook build"
   },
   "dependencies": {

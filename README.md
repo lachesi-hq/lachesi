@@ -197,9 +197,21 @@ pnpm test
 pnpm lint
 pnpm build
 pnpm storybook
+pnpm storybook:build
 ```
 
 `pnpm build` runs TypeScript and Vite production build. `pnpm lint` runs Biome.
+`pnpm storybook:build` creates the static Storybook output in `storybook-static/`.
+
+### Published Storybook
+
+The design system Storybook is prepared for publication at:
+
+```txt
+https://design-system.lachesi.dev
+```
+
+Deployment instructions for Cloudflare Pages are in `docs/storybook-publishing.md`.
 
 ## Configuration
 
