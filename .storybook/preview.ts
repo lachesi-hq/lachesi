@@ -11,6 +11,14 @@ const preview: Preview = {
     },
     layout: "fullscreen",
     backgrounds: { disable: true },
+    docs: {
+      toc: true,
+    },
+    options: {
+      storySort: {
+        order: ["Design System", "App", "Diff", "Pull Requests", "Comments", "Settings"],
+      },
+    },
   },
   globalTypes: {
     theme: {
