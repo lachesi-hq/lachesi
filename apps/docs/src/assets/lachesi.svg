@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lachesi">
+  <rect width="64" height="64" rx="14" fill="#101113" />
+  <path
+    d="M18 42c8-22 20-22 28 0"
+    fill="none"
+    stroke="#f8f7f2"
+    stroke-width="5"
+    stroke-linecap="round"
+  />
+  <path
+    d="M22 43h20"
+    fill="none"
+    stroke="#2fa99a"
+    stroke-width="5"
+    stroke-linecap="round"
+  />
+  <circle cx="32" cy="23" r="6" fill="#d6a11d" />
+</svg>

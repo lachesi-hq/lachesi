@@ -1,5 +1,5 @@
 {
-  "name": "@lachesi/web",
+  "name": "@lachesi/docs",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -9,6 +9,7 @@
     "preview": "astro preview"
   },
   "dependencies": {
+    "@astrojs/starlight": "^0.41.3",
     "astro": "^7.0.6"
   },
   "devDependencies": {

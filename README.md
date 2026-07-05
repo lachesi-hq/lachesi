@@ -226,12 +226,15 @@ pnpm build
 pnpm storybook
 pnpm storybook:build
 pnpm storybook:deploy
+pnpm docs:dev
+pnpm docs:build
 ```
 
 `pnpm build` runs TypeScript and Vite production build. `pnpm lint` runs Biome.
 `pnpm storybook:build` creates the static Storybook output in `storybook-static/`.
 `pnpm storybook:deploy` deploys the built Storybook through the dedicated Cloudflare Workers Static
 Assets config.
+`pnpm docs:dev` and `pnpm docs:build` run the Astro/Starlight documentation site in `apps/docs`.
 
 ### Published Storybook
 

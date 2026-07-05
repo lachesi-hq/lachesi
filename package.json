@@ -21,6 +21,9 @@
     "storybook": "storybook dev -p 6006",
     "storybook:build": "storybook build --output-dir storybook-static",
     "storybook:deploy": "npx wrangler deploy --config wrangler.design-system.jsonc",
+    "docs:dev": "pnpm --filter @lachesi/docs dev",
+    "docs:build": "pnpm --filter @lachesi/docs build",
+    "docs:preview": "pnpm --filter @lachesi/docs preview",
     "build-storybook": "storybook build"
   },
   "dependencies": {

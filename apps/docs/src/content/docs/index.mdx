@@ -1,0 +1,35 @@
+---
+title: Lachesi
+description: Local-first pull request review workspace for Bitbucket Cloud and GitHub.
+template: splash
+hero:
+  title: Lachesi
+  tagline: A local-first review workspace for pull requests, AI-assisted findings, local evidence, and reviewer-controlled publication.
+  actions:
+    - text: Get started
+      link: /getting-started/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/lachesi-hq/lachesi
+      icon: external
+      variant: secondary
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## What Lachesi Provides
+
+<CardGrid>
+  <Card title="Pull request workspace" icon="seti:git">
+    Review Bitbucket Cloud and GitHub pull requests from a desktop UI designed for focused review work.
+  </Card>
+  <Card title="AI review runs" icon="open-book">
+    Run Claude or Codex review flows, keep review threads local, and turn useful output into structured findings.
+  </Card>
+  <Card title="Local evidence" icon="setting">
+    Connect repositories to local clones for branch status, sync, fix, commit, and push workflows.
+  </Card>
+  <Card title="Controlled publication" icon="check-circle">
+    Stage comments locally and publish only what the reviewer explicitly approves.
+  </Card>
+</CardGrid>
