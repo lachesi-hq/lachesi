@@ -1,0 +1,92 @@
+@import "../../../../src/styles/brand.css";
+
+:root {
+  --sl-font: var(--lachesi-font-sans);
+  --sl-font-mono: var(--lachesi-font-mono);
+  --sl-color-white: var(--lachesi-surface);
+  --sl-color-gray-1: var(--lachesi-text);
+  --sl-color-gray-2: var(--lachesi-text-muted);
+  --sl-color-gray-3: var(--lachesi-text-soft);
+  --sl-color-gray-4: var(--lachesi-border-strong);
+  --sl-color-gray-5: var(--lachesi-border);
+  --sl-color-gray-6: var(--lachesi-bg-subtle);
+  --sl-color-black: var(--lachesi-bg);
+  --sl-color-accent-low: var(--lachesi-accent-muted);
+  --sl-color-accent: var(--lachesi-accent);
+  --sl-color-accent-high: var(--lachesi-accent-strong);
+  --sl-color-text-accent: var(--lachesi-accent-strong);
+  --sl-color-bg: var(--lachesi-bg);
+  --sl-color-bg-nav: color-mix(in srgb, var(--lachesi-surface) 88%, transparent);
+  --sl-color-bg-sidebar: var(--lachesi-bg);
+  --sl-color-bg-inline-code: var(--lachesi-bg-subtle);
+  --sl-color-hairline: var(--lachesi-border);
+  --sl-color-hairline-light: var(--lachesi-border);
+  --sl-color-text: var(--lachesi-text);
+  --sl-color-text-muted: var(--lachesi-text-muted);
+  --sl-color-link: var(--lachesi-accent-strong);
+}
+
+:root[data-theme="dark"] {
+  --sl-color-bg-nav: color-mix(in srgb, var(--lachesi-surface) 84%, transparent);
+  --sl-color-text-accent: var(--lachesi-accent-strong);
+  --sl-color-link: var(--lachesi-accent-strong);
+}
+
+html,
+body {
+  background: var(--lachesi-bg);
+}
+
+.header {
+  border-bottom: 1px solid var(--lachesi-border);
+  backdrop-filter: blur(12px);
+}
+
+.site-title {
+  color: var(--lachesi-text);
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.hero {
+  padding-block: clamp(3rem, 7vw, 6rem);
+}
+
+.hero > img {
+  filter: drop-shadow(var(--lachesi-shadow-soft));
+}
+
+.hero .tagline {
+  color: var(--lachesi-text-muted);
+}
+
+.sl-markdown-content :is(h1, h2, h3, h4) {
+  letter-spacing: 0;
+}
+
+.sl-markdown-content code:not(:where(.astro-code code)) {
+  border: 1px solid var(--lachesi-border);
+  border-radius: var(--lachesi-radius-sm);
+  background: var(--lachesi-bg-subtle);
+  color: var(--lachesi-text);
+}
+
+.card {
+  border-color: var(--lachesi-border);
+  border-radius: var(--lachesi-radius-md);
+  background: var(--lachesi-surface);
+}
+
+.card:hover {
+  border-color: var(--lachesi-border-strong);
+}
+
+.pagination-links a,
+.sl-link-button {
+  border-radius: var(--lachesi-radius-md);
+}
+
+.right-sidebar,
+.sidebar-pane {
+  border-color: var(--lachesi-border);
+}

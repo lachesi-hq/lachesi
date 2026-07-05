@@ -11,6 +11,7 @@ export default defineConfig({
         src: "./src/assets/lachesi.svg",
         alt: "Lachesi",
       },
+      customCss: ["./src/styles/starlight.css"],
       social: [
         {
           icon: "github",

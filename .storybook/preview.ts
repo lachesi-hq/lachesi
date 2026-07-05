@@ -39,6 +39,7 @@ const preview: Preview = {
     (Story, context) => {
       const theme = context.globals.theme ?? "dark";
       document.documentElement.setAttribute("data-theme", theme);
+      document.documentElement.style.setProperty("color-scheme", theme);
       return Story();
     },
   ],

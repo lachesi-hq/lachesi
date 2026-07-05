@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/brand.css";
 
 @font-face {
   font-family: "Geist Variable";
@@ -43,31 +44,31 @@
    Semantic CSS variables consumed by Tailwind utilities via @theme inline.
 ---------------------------------------------------------------------------- */
 :root {
-  --background: #ffffff;
-  --foreground: #1f2328;
-  --card: #ffffff;
-  --card-foreground: #1f2328;
-  --popover: #ffffff;
-  --popover-foreground: #1f2328;
+  --background: var(--lachesi-bg);
+  --foreground: var(--lachesi-text);
+  --card: var(--lachesi-surface);
+  --card-foreground: var(--lachesi-text);
+  --popover: var(--lachesi-surface-raised);
+  --popover-foreground: var(--lachesi-text);
   --primary: #ffffff;
   --primary-foreground: #0d0d0d;
-  --secondary: #f6f8fa;
-  --secondary-foreground: #1f2328;
-  --muted: #f6f8fa;
-  --muted-foreground: #59636e;
-  --accent: #ddf4ff;
-  --accent-foreground: #0969da;
-  --destructive: #cf222e;
+  --secondary: var(--lachesi-bg-subtle);
+  --secondary-foreground: var(--lachesi-text);
+  --muted: var(--lachesi-bg-subtle);
+  --muted-foreground: var(--lachesi-text-muted);
+  --accent: var(--lachesi-accent-muted);
+  --accent-foreground: var(--lachesi-accent-strong);
+  --destructive: var(--lachesi-danger);
   --destructive-foreground: #ffffff;
   --success: #1a7f37;
-  --warning: #9a6700;
-  --border: #d1d9e0;
-  --input: #d1d9e0;
+  --warning: var(--lachesi-warning);
+  --border: var(--lachesi-border);
+  --input: var(--lachesi-border);
   --ring: #1f6feb;
 
   /* Sidebar / surfaces */
-  --sidebar: #f6f8fa;
-  --sidebar-foreground: #1f2328;
+  --sidebar: var(--lachesi-bg-subtle);
+  --sidebar-foreground: var(--lachesi-text);
 
   /* Diff */
   --diff-add-bg: #e6ffec;
@@ -81,44 +82,44 @@
   /* Bottom pane toolbar */
   --toolbar-height: 32px;
   --toolbar-bg: #f6f8fa;
-  --toolbar-line: #d1d9e0;
-  --toolbar-line-strong: #c2cad2;
-  --toolbar-icon: #59636e;
-  --toolbar-ink: #1f2328;
+  --toolbar-line: var(--lachesi-border);
+  --toolbar-line-strong: var(--lachesi-border-strong);
+  --toolbar-icon: var(--lachesi-text-muted);
+  --toolbar-ink: var(--lachesi-text);
   --toolbar-hover-bg: #eef2f6;
   --toolbar-active-bg: rgba(31, 111, 235, 0.12);
   --toolbar-active-ink: #0969da;
   --toolbar-accent: #1f6feb;
   --toolbar-tooltip-bg: #ffffff;
 
-  --radius: 0.5rem;
+  --radius: var(--lachesi-radius-md);
 }
 
 [data-theme="dark"] {
-  --background: #0d0d0d;
-  --foreground: #e0e0e0;
-  --card: #141414;
-  --card-foreground: #e0e0e0;
-  --popover: #1a1a1a;
-  --popover-foreground: #e0e0e0;
+  --background: var(--lachesi-bg);
+  --foreground: var(--lachesi-text);
+  --card: var(--lachesi-surface);
+  --card-foreground: var(--lachesi-text);
+  --popover: var(--lachesi-surface-raised);
+  --popover-foreground: var(--lachesi-text);
   --primary: #ffffff;
   --primary-foreground: #0d0d0d;
-  --secondary: #141414;
+  --secondary: var(--lachesi-surface);
   --secondary-foreground: #ffffff;
-  --muted: #1a1a1a;
-  --muted-foreground: #777777;
-  --accent: #1a1a1a;
+  --muted: var(--lachesi-surface-raised);
+  --muted-foreground: var(--lachesi-text-soft);
+  --accent: var(--lachesi-surface-raised);
   --accent-foreground: #ffffff;
-  --destructive: #f85149;
+  --destructive: var(--lachesi-danger);
   --destructive-foreground: #ffffff;
   --success: #3fb950;
-  --warning: #d29922;
-  --border: #2a2a2a;
-  --input: #2a2a2a;
+  --warning: var(--lachesi-warning);
+  --border: var(--lachesi-border);
+  --input: var(--lachesi-border);
   --ring: #2f81f7;
 
-  --sidebar: #141414;
-  --sidebar-foreground: #e0e0e0;
+  --sidebar: var(--lachesi-surface);
+  --sidebar-foreground: var(--lachesi-text);
 
   --diff-add-bg: #12261e;
   --diff-add-gutter: #1f572f;
@@ -131,7 +132,7 @@
   --toolbar-bg: #141414;
   --toolbar-line: #2a2a2a;
   --toolbar-line-strong: #2a2a2a;
-  --toolbar-icon: #777777;
+  --toolbar-icon: var(--lachesi-text-soft);
   --toolbar-ink: #ffffff;
   --toolbar-hover-bg: #1a1a1a;
   --toolbar-active-bg: #1f1f1f;
