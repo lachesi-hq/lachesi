@@ -24,6 +24,7 @@
     "docs:dev": "pnpm --filter @lachesi/docs dev",
     "docs:build": "pnpm --filter @lachesi/docs build",
     "docs:preview": "pnpm --filter @lachesi/docs preview",
+    "docs:deploy": "npx wrangler deploy --config wrangler.docs.jsonc",
     "build-storybook": "storybook build"
   },
   "dependencies": {

@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lachesi-docs",
+  "compatibility_date": "2026-07-05",
+  "assets": {
+    "directory": "./apps/docs/dist",
+    "not_found_handling": "404-page"
+  }
+}
