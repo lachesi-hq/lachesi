@@ -20,6 +20,7 @@
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006",
     "storybook:build": "storybook build --output-dir storybook-static",
+    "storybook:deploy": "npx wrangler deploy --config wrangler.design-system.jsonc",
     "build-storybook": "storybook build"
   },
   "dependencies": {

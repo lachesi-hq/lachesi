@@ -30,6 +30,21 @@ Production branch: main
 
 Cloudflare Pages starts from the repository root unless a root directory is configured, then uploads the build output directory as the site contents.
 
+## Cloudflare Workers Static Assets
+
+If the Cloudflare project requires a deploy command, use the dedicated Wrangler config instead of bare `wrangler deploy`.
+
+Use these build settings:
+
+```txt
+Build command: pnpm storybook:build
+Deploy command: npx wrangler deploy --config wrangler.design-system.jsonc
+```
+
+The config in `wrangler.design-system.jsonc` points Wrangler at `storybook-static/` explicitly, so Wrangler does not try to infer the monorepo's Astro app settings.
+
+The Cloudflare API token for this flow must be able to deploy Workers. A Pages-only token is not enough.
+
 ## Custom Domain
 
 Attach this custom domain to the Cloudflare Pages project:
