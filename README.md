@@ -239,6 +239,19 @@ Assets config.
 `pnpm docs:deploy` deploys the built documentation site through the dedicated Cloudflare Workers
 Static Assets config.
 
+### macOS arm64 builds
+
+macOS arm64 app bundles are not signed. If macOS reports that `Lachesi.app` is damaged and cannot
+be opened, clear the quarantine attributes and apply an ad-hoc local signature to the built app:
+
+```sh
+xattr -rc "Lachesi.app"
+sudo codesign --force --deep --sign - "Lachesi.app"
+```
+
+Run those commands against the copied app bundle, for example the app in `/Applications` or the
+bundle produced by `pnpm tauri build`.
+
 ### Published Storybook
 
 The design system Storybook is prepared for publication at:
