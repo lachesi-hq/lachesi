@@ -1,8 +1,10 @@
 # Lachesi
 
-Lachesi is an open-source, local-first review workspace for Bitbucket pull requests.
-It combines a GitHub-style desktop review UI with AI-assisted review runs, structured findings,
-local evidence, and reviewer-controlled publication back to Bitbucket.
+Lachesi is an open-source, local-first review workspace for pull requests across Bitbucket Cloud
+and GitHub.
+
+It combines a focused desktop review UI with AI-assisted review runs, structured findings, local
+evidence, closed-PR analytics, and reviewer-controlled publication back to the source provider.
 
 The name comes from Lachesis, the Moira who measures the thread. Lachesi measures the thread of a
 change: the PR metadata, diff, linked context, local repository state, review findings, and the
@@ -10,67 +12,81 @@ comments a human reviewer decides to publish.
 
 ## What It Is
 
-Bitbucket is the source of truth for pull requests. Lachesi is the local review surface around it.
+Your code host remains the source of truth for pull requests. Lachesi is the local review surface
+around it.
 
 Today it is a Tauri desktop app that can:
 
-- track multiple Bitbucket Cloud repositories in one sidebar;
+- track multiple Bitbucket Cloud and GitHub repositories in one sidebar;
 - browse open, draft, merged, and declined pull requests;
 - render readable unified or split diffs with syntax highlighting and diff stats;
+- preview changed image files such as PNG, JPEG, SVG, GIF, and WebP;
 - show PR metadata, reviewers, approvals, branch age/status, and existing comments;
-- stage inline or general review comments locally before publishing them to Bitbucket;
-- approve PRs through the Bitbucket API;
-- run AI review flows with Claude, persist review threads, and continue the conversation;
+- stage inline or general review comments locally before publishing them;
+- approve PRs through the configured provider API;
+- run AI review flows with Claude or Codex, persist review threads, and continue the conversation;
 - turn AI review output into structured findings and draft comments;
 - run local fix, commit, push, branch sync, and conflict-resolution workflows from a configured clone;
+- sync and analyze closed PRs by author, repository, churn, lead time, risk, and review coverage;
 - enrich review context with Jira issues and Notion pages when credentials are configured;
 - store review history, review jobs, run logs, findings, evidence, and publication state locally.
 
-The long-term direction is a local/open-source CodeRabbit-style review engine for Bitbucket: desktop
-first, but with shared review contracts that can power a future CLI, CI usage, policy checks, and
-documentation site.
+The long-term direction is a local/open-source review engine: desktop first, but with shared review
+contracts that can power a future CLI, CI usage, policy checks, private policy packs, and public
+documentation.
 
 ## Why
 
-Bitbucket's web review UI can feel cramped and noisy for reviewers used to GitHub. More importantly,
-modern review work is no longer just "read a diff and leave comments". A good reviewer often needs
-to inspect local branches, run deterministic checks, read linked tickets/docs, ask an AI assistant for
-a second pass, curate the useful findings, and decide what to publish.
+Web review UIs can feel cramped and noisy for repeated, high-context review work. More importantly,
+modern review is no longer just "read a diff and leave comments". A good reviewer often needs to
+inspect local branches, run deterministic checks, read linked tickets/docs, ask an AI assistant for a
+second pass, curate the useful findings, and decide what to publish.
 
 Lachesi keeps that workflow local and explicit:
 
 - credentials stay out of the webview;
 - AI output is treated as draft review material, not automatic remote feedback;
-- Bitbucket writes require reviewer action;
+- provider writes require reviewer action;
 - repo-specific rules live near the code through `.lachesi.yaml`;
 - review output is moving toward a structured schema instead of free-form chat only.
 
 ## Current Product Surface
+
+### Provider Support
+
+- Bitbucket Cloud repositories using workspace/repository coordinates.
+- GitHub repositories using owner/repository coordinates.
+- Separate provider configuration panels and separate local credentials.
+- Bitbucket credentials use Atlassian email + API token.
+- GitHub credentials use a GitHub token stored separately in the local credentials layer.
+- Provider-aware PR list, PR detail, diff, diffstat, comments, approvals, branch status, image
+  previews, local clone discovery, and closed-PR analytics.
 
 ### Pull Request Review
 
 - Multi-repository PR list with repository and author filters.
 - Open, draft, merged, and declined PR states.
 - PR detail header with branches, reviewers, approvals, and branch status.
-- Unified and split diff modes powered by parsed Bitbucket diffs.
+- Unified and split diff modes powered by parsed provider diffs.
 - File-level diff stats and changed-file navigation primitives.
-- Existing Bitbucket comments and local draft comments rendered in context.
+- Image previews for binary image changes when the provider can return the file content.
+- Existing provider comments and local draft comments rendered in context.
 - Local pending-review bar for staged comments, with publish/discard controls.
 
 ### AI Review Workspace
 
-- Claude-backed review runs from the active PR.
+- Claude or Codex review runs from the active PR.
 - Replyable review threads persisted per PR.
 - Review run state, logs, cancellation, success/failure tracking, and review history.
 - Structured `ReviewRun`, `ReviewFinding`, and `ReviewEvidenceArtifact` models layered alongside
   the conversational thread.
-- Finding publication tracking for staged drafts and published Bitbucket comments.
-- `Fix with Claude` workflow that operates against the local clone and can progress through fix,
-  verification, commit, and push phases.
+- Finding publication tracking for staged drafts and published provider comments.
+- AI fix workflow that operates against the local clone and can progress through fix, verification,
+  commit, and push phases.
 
 ### Local Repository Integration
 
-Each tracked Bitbucket repository can point to a local clone. That enables:
+Each tracked repository can point to a local clone. That enables:
 
 - branch status checks;
 - branch checkout/fetch/pull utilities;
@@ -78,6 +94,16 @@ Each tracked Bitbucket repository can point to a local clone. That enables:
 - conflict-resolution assistance;
 - AI fix execution in the worktree;
 - commit and push steps controlled by the reviewer.
+
+### Closed PR Analytics
+
+Lachesi can cache and analyze closed PRs locally. The analytics view supports:
+
+- 14/30/90 day ranges;
+- repository, author, and text filtering;
+- PR count, churn, average changed files, average close time, and AI review coverage;
+- charts by author, repository, churn, risk category, and weekly frequency;
+- a horizontally scrollable largest-PR table with opened and closed dates.
 
 ### Context Integrations
 
@@ -87,11 +113,11 @@ Each tracked Bitbucket repository can point to a local clone. That enables:
 
 ### Local Storage And Secrets
 
-- Bitbucket, Jira, and Notion credentials are stored through the local credentials layer.
+- Bitbucket, GitHub, Jira, and Notion credentials are stored through the local credentials layer.
 - Non-secret app settings are stored as JSON in the OS config directory.
 - AI review stores and background review jobs are stored in a local SQLite database.
 - Legacy JSON review storage is migrated into SQLite when read.
-- `LACHESI_DRY_RUN=1` can exercise comment flows without posting to Bitbucket.
+- `LACHESI_DRY_RUN=1` can exercise comment flows without posting to the provider.
 
 ## Repo-Owned Review Config
 
@@ -137,8 +163,8 @@ Lachesi is split across a React frontend and a Rust/Tauri backend.
 - **Frontend:** React 19, TypeScript, Vite, Tailwind v4, shadcn-style primitives, Radix components,
   Phosphor icons, Geist fonts.
 - **Desktop shell:** Tauri v2.
-- **Bitbucket access:** Rust `reqwest` commands behind Tauri IPC. Tokens never need to enter the
-  browser webview.
+- **Provider access:** Rust `reqwest` commands behind Tauri IPC for Bitbucket Cloud and GitHub.
+  Tokens never need to enter the browser webview.
 - **State model:** React hooks plus Tauri commands; no external frontend state library.
 - **IPC boundary:** frontend calls go through `src/lib/tauri.ts`, which can route to mock handlers
   for browser dev, Storybook, and Vitest.
@@ -167,8 +193,9 @@ Useful design notes live in:
 - Node.js and pnpm
 - Rust toolchain
 - Tauri v2 prerequisites for your OS
-- Bitbucket Cloud account email and API token for real API usage
-- Claude CLI available locally for AI review/fix flows
+- Bitbucket Cloud account email and API token for Bitbucket usage
+- GitHub token for GitHub usage
+- Claude CLI and/or Codex CLI available locally for AI review/fix flows
 
 ### Install
 
@@ -198,10 +225,13 @@ pnpm lint
 pnpm build
 pnpm storybook
 pnpm storybook:build
+pnpm storybook:deploy
 ```
 
 `pnpm build` runs TypeScript and Vite production build. `pnpm lint` runs Biome.
 `pnpm storybook:build` creates the static Storybook output in `storybook-static/`.
+`pnpm storybook:deploy` deploys the built Storybook through the dedicated Cloudflare Workers Static
+Assets config.
 
 ### Published Storybook
 
@@ -211,20 +241,23 @@ The design system Storybook is prepared for publication at:
 https://design-system.lachesi.dev
 ```
 
-Deployment instructions for Cloudflare Pages are in `docs/storybook-publishing.md`.
+Deployment instructions for Cloudflare are in `docs/storybook-publishing.md`.
 
 ## Configuration
 
 In the app settings, configure:
 
-- one or more Bitbucket `workspace` / `repository` pairs;
+- review provider: Bitbucket or GitHub;
+- one or more provider-specific repositories;
 - optional local clone paths for branch, fix, commit, push, and sync workflows;
 - Atlassian email and Bitbucket API token;
+- GitHub token;
 - default diff view;
-- Claude model and effort;
+- AI provider: Claude or Codex;
+- Claude/Codex model and effort;
 - preferred terminal for review/fix launches;
 - optional Jira base URL, Jira token, and Notion token;
-- menu-bar sync and desktop notifications.
+- automatic sync interval, menu-bar sync, and desktop notifications.
 
 ### Menu Bar Legend
 
@@ -243,18 +276,15 @@ committed. See `SECURITY.md`.
 
 ## Roadmap
 
-The public roadmap is tracked in GitHub issues. The current open direction is:
+The public roadmap is tracked in GitHub issues and the Lachesi roadmap project. The current direction
+is:
 
-- [#1](https://github.com/lachesi-hq/lachesi/issues/1) implement an enforceable `.lachesi.yaml`
-  policy engine;
-- [#2](https://github.com/lachesi-hq/lachesi/issues/2) add local review learnings from reviewer
-  feedback;
-- [#3](https://github.com/lachesi-hq/lachesi/issues/3) implement a headless `lachesi review` CLI;
-- [#4](https://github.com/lachesi-hq/lachesi/issues/4) generate PR summaries and walkthroughs;
-- [#5](https://github.com/lachesi-hq/lachesi/issues/5) add targeted finishing-touch AI actions;
-- [#6](https://github.com/lachesi-hq/lachesi/issues/6) create the public Astro website and docs;
-- [#7](https://github.com/lachesi-hq/lachesi/issues/7) support Codex as an AI review provider;
-- [#8](https://github.com/lachesi-hq/lachesi/issues/8) add a changed-files tree view.
+- harden the `.lachesi.yaml` policy engine and local evidence pipeline;
+- add policy pack loading and named review profiles;
+- implement a headless `lachesi review` CLI for local and CI usage;
+- improve provider abstraction across Bitbucket, GitHub, AI providers, and publication targets;
+- expand report export, review summaries, and dogfooding guides;
+- publish the website and design system documentation.
 
 ## Project Status
 
