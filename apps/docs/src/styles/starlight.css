@@ -3,19 +3,12 @@
 :root {
   --sl-font: var(--lachesi-font-sans);
   --sl-font-mono: var(--lachesi-font-mono);
-  --sl-color-white: var(--lachesi-surface);
-  --sl-color-gray-1: var(--lachesi-text);
-  --sl-color-gray-2: var(--lachesi-text-muted);
-  --sl-color-gray-3: var(--lachesi-text-soft);
-  --sl-color-gray-4: var(--lachesi-border-strong);
-  --sl-color-gray-5: var(--lachesi-border);
-  --sl-color-gray-6: var(--lachesi-bg-subtle);
-  --sl-color-black: var(--lachesi-bg);
   --sl-color-accent-low: var(--lachesi-accent-muted);
   --sl-color-accent: var(--lachesi-accent);
   --sl-color-accent-high: var(--lachesi-accent-strong);
   --sl-color-text-accent: var(--lachesi-accent-strong);
   --sl-color-bg: var(--lachesi-bg);
+  --sl-color-bg-overlap: var(--lachesi-surface);
   --sl-color-bg-nav: color-mix(in srgb, var(--lachesi-surface) 88%, transparent);
   --sl-color-bg-sidebar: var(--lachesi-bg);
   --sl-color-bg-inline-code: var(--lachesi-bg-subtle);
@@ -24,17 +17,21 @@
   --sl-color-text: var(--lachesi-text);
   --sl-color-text-muted: var(--lachesi-text-muted);
   --sl-color-link: var(--lachesi-accent-strong);
+  --lachesi-docs-sidebar-active-text: #ffffff;
 }
 
 :root[data-theme="dark"] {
+  --sl-color-bg-overlap: var(--lachesi-surface);
   --sl-color-bg-nav: color-mix(in srgb, var(--lachesi-surface) 84%, transparent);
   --sl-color-text-accent: var(--lachesi-accent-strong);
   --sl-color-link: var(--lachesi-accent-strong);
+  --lachesi-docs-sidebar-active-text: #071211;
 }
 
 html,
 body {
   background: var(--lachesi-bg);
+  color: var(--lachesi-text);
 }
 
 .header {
@@ -60,8 +57,21 @@ body {
   color: var(--lachesi-text-muted);
 }
 
+.sl-markdown-content {
+  color: var(--lachesi-text);
+}
+
 .sl-markdown-content :is(h1, h2, h3, h4) {
+  color: var(--lachesi-text);
   letter-spacing: 0;
+}
+
+.sl-markdown-content :is(p, li) {
+  color: var(--lachesi-text);
+}
+
+.sl-markdown-content a {
+  color: var(--lachesi-accent-strong);
 }
 
 .sl-markdown-content code:not(:where(.astro-code code)) {
@@ -89,4 +99,33 @@ body {
 .right-sidebar,
 .sidebar-pane {
   border-color: var(--lachesi-border);
+}
+
+.sidebar-content,
+.right-sidebar {
+  color: var(--lachesi-text-muted);
+}
+
+.sidebar-content a,
+.right-sidebar a {
+  color: var(--lachesi-text-muted);
+}
+
+.right-sidebar a[aria-current="true"],
+.right-sidebar a[aria-current="location"] {
+  color: var(--lachesi-accent-strong);
+}
+
+.sidebar-content a[aria-current="page"] {
+  color: var(--lachesi-docs-sidebar-active-text);
+  font-weight: 650;
+}
+
+.sidebar-content summary,
+.sidebar-content .large {
+  color: var(--lachesi-text);
+}
+
+.social-icons::before {
+  background: var(--lachesi-border);
 }
