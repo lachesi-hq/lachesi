@@ -4,6 +4,7 @@ const ALLOWED_FILES = new Set([
   "src/hooks/useTheme.ts",
   "src/lib/reviewPrompt.ts",
   "src/hooks/useDraftComments.ts",
+  "src/lib/reviewReferencesStorage.ts",
   "src/components/pr-sidebar/PrSidebar.tsx",
   "src/mock-tauri/mock-handlers.ts",
 ]);

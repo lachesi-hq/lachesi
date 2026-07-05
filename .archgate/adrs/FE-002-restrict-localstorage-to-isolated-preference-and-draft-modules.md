@@ -14,6 +14,7 @@ Lachesi uses browser storage for a small set of user-local concerns while runnin
 - theme preference in `src/hooks/useTheme.ts`
 - per-repo AI review prompt overrides in `src/lib/reviewPrompt.ts`
 - staged draft comments in `src/hooks/useDraftComments.ts`
+- per-PR review references (Jira/Notion links) in `src/lib/reviewReferencesStorage.ts`
 - collapsed repository state in `src/components/pr-sidebar/PrSidebar.tsx`
 - mock IPC review persistence for browser dev/Storybook mode in `src/mock-tauri/mock-handlers.ts`
 
@@ -30,10 +31,22 @@ Today the allowed modules are:
 - `src/hooks/useTheme.ts`
 - `src/lib/reviewPrompt.ts`
 - `src/hooks/useDraftComments.ts`
+- `src/lib/reviewReferencesStorage.ts`
 - `src/components/pr-sidebar/PrSidebar.tsx`
 - `src/mock-tauri/mock-handlers.ts`
 
 Any new direct `localStorage` usage outside those modules requires an ADR update or a deliberate exception.
+
+Durable, structured, or application-wide data should not use `localStorage` at all — it belongs in native, Tauri-backed persistence. Readest (the reference app for this work) keeps durable data behind a `FileSystem` abstraction with an atomic-save persistence helper and localStorage only for lightweight, ephemeral UI preferences; Lachesi already follows this shape by keeping saved reviews in `~/.local/share/lachesi/` via Rust (see `CLAUDE.md`).
+
+### Known drift to reconcile
+
+Two sites currently access `localStorage` outside the allowlist and are treated as violations until resolved:
+
+- `src/components/pr-detail/PrDetailPanel.tsx` (viewed-file state)
+- `src/hooks/useMenuBarPrSync.ts` (menu-bar notification snapshot state)
+
+These should move behind a small owner hook/module (and be added to the allowlist with rationale only if they are intentionally made owners), not be allowlisted in place. Components in particular must not perform ad hoc inline storage reads/writes.
 
 ## Do's and Don'ts
 
@@ -85,4 +98,8 @@ Code review should still reject broader violations that are not yet machine-chec
 - `src/hooks/useTheme.ts`
 - `src/lib/reviewPrompt.ts`
 - `src/hooks/useDraftComments.ts`
+- `src/lib/reviewReferencesStorage.ts`
 - `src/components/pr-sidebar/PrSidebar.tsx`
+- `src/components/pr-detail/PrDetailPanel.tsx` (known drift — viewed-file state)
+- `src/hooks/useMenuBarPrSync.ts` (known drift — menu-bar snapshot state)
+- [Route native calls through typed frontend service modules above tauriCall](./FE-003-route-native-calls-through-typed-frontend-service-modules.md)
