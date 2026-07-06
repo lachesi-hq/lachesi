@@ -52,7 +52,7 @@ import {
 import { formatRelative } from "@/lib/format";
 import { extractIssueKeys } from "@/lib/jira";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
-import { tauriCall } from "@/lib/tauri";
+import { approvePullRequest } from "@/lib/providerService";
 import { loadViewedFiles, saveViewedFiles, viewedFilesStorageKey } from "@/lib/viewedFilesStorage";
 import type {
   AiLineQuestionContext,
@@ -581,7 +581,7 @@ function ApprovePullRequestButton({
     setBusy(true);
     setError(null);
     try {
-      await tauriCall("approve_pull_request", { provider, workspace, repo, id: prId });
+      await approvePullRequest({ provider, workspace, repo, id: prId });
       await onApproved();
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));

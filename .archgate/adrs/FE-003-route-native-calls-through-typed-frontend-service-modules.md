@@ -29,7 +29,7 @@ This means:
 - **presentational components (`src/components/**`) must not call `tauriCall` directly** — they go through hooks or services
 - the mock IPC layer (ARCH-003) continues to back services in browser dev, Storybook, and Vitest, so the native/mock split is preserved end-to-end
 
-The enforced machine-checked invariant is the component boundary. Consolidating the ~20 hook call sites into named, typed services is the broader direction: migrate feature paths incrementally (one end-to-end first), moving raw command strings out of hooks into services as they are touched.
+The enforced machine-checked invariant is the component boundary. Consolidating the hook call sites into named, typed services is the broader direction: migrate feature paths incrementally, moving raw command strings out of hooks into services as they are touched.
 
 ## Do's and Don'ts
 
@@ -86,8 +86,12 @@ Code review should still reject broader violations that are not yet machine-chec
 ## References
 
 - `src/lib/tauri.ts`
-- `src/components/pr-detail/PrDetailPanel.tsx` (current direct `tauriCall` in a component)
-- `src/components/repository-explorer/RepositoryExplorerPanel.tsx` (current direct `tauriCall` in a component)
-- `src/components/review-history/ReviewHistoryPanel.tsx` (current direct `tauriCall` in a component)
+- `src/lib/providerService.ts`
+- `src/lib/localRepoService.ts`
+- `src/lib/reviewService.ts`
+- `src/components/pr-detail/PrDetailPanel.tsx`
+- `src/components/repository-explorer/RepositoryExplorerPanel.tsx`
+- `src/components/review-history/ReviewHistoryPanel.tsx`
+- `src/components/repositories/RepositoryBranchesPanel.tsx`
 - [Use a Tauri desktop shell with a React webview and a Rust Bitbucket client](./ARCH-001-tauri-react-rust-bitbucket-boundary.md)
 - [Keep Tauri command and mock IPC surfaces in sync](./ARCH-003-keep-tauri-command-and-mock-ipc-surfaces-in-sync.md)

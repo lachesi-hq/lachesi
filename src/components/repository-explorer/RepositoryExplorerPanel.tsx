@@ -15,7 +15,13 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Markdown, markdownHeadingId, markdownHeadingSlug } from "@/components/Markdown";
 import { type HighlightNode, highlightCode } from "@/lib/highlight";
-import { tauriCall } from "@/lib/tauri";
+import {
+  getRepositoryFileBlame,
+  getRepositoryFileDiff,
+  listRepositoryFiles,
+  openRepositoryFileExternal,
+  readRepositoryFile,
+} from "@/lib/localRepoService";
 import { cn } from "@/lib/utils";
 import type {
   RepositoryBlameLine,
@@ -842,7 +848,7 @@ export function RepositoryExplorerPanel({
         ...previous,
         [path]: { status: "loading", lines: [], error: null },
       }));
-      tauriCall<RepositoryBlameLine[]>("get_repository_file_blame", { workspace, repo, path })
+      getRepositoryFileBlame({ workspace, repo, path })
         .then((lines) => {
           setBlameByPath((previous) => ({
             ...previous,
@@ -945,7 +951,7 @@ export function RepositoryExplorerPanel({
     setLoadingFiles(true);
     setError(null);
     setBlameByPath({});
-    tauriCall<RepositoryFileEntry[]>("list_repository_files", { workspace, repo })
+    listRepositoryFiles(workspace, repo)
       .then((nextFiles) => {
         if (cancelled) return;
         setFiles(nextFiles);
@@ -978,7 +984,7 @@ export function RepositoryExplorerPanel({
     let cancelled = false;
     setLoadingContent(true);
     setContentError(null);
-    tauriCall<RepositoryFileContent>("read_repository_file", {
+    readRepositoryFile({
       workspace,
       repo,
       path: selectedPath,
@@ -1007,7 +1013,7 @@ export function RepositoryExplorerPanel({
 
     let cancelled = false;
     setFileDiffState({ status: "loading", diff: null, error: null });
-    tauriCall<RepositoryFileDiff>("get_repository_file_diff", {
+    getRepositoryFileDiff({
       workspace,
       repo,
       path: selectedPath,
@@ -1069,7 +1075,7 @@ export function RepositoryExplorerPanel({
     if (!workspace || !repo || !selectedPath) return;
     setOpeningExternalFile(true);
     setExternalOpenError(null);
-    tauriCall("open_repository_file_external", {
+    openRepositoryFileExternal({
       workspace,
       repo,
       path: selectedPath,
