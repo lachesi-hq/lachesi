@@ -1,6 +1,6 @@
 /// <reference path="../rules.d.ts" />
 
-const CALL_PATTERN = /\btauriCall\s*\(/g;
+const CALL_PATTERN = /\btauriCall\s*(?:<[^>]+>)?\s*\(/g;
 
 export default {
   rules: {

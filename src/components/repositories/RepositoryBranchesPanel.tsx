@@ -2,7 +2,12 @@ import { ArrowsClockwise, GitBranch, WarningCircle } from "@phosphor-icons/react
 import { useCallback, useEffect, useReducer } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { tauriCall } from "@/lib/tauri";
+import {
+  checkoutRepositoryBranch,
+  fetchRepository,
+  listRepositoryWorktrees,
+  pullRepository,
+} from "@/lib/localRepoService";
 import type { RepositoryWorktreeState, RepositoryWorktreeStatus } from "@/types";
 
 function statusLabel(status: RepositoryWorktreeStatus): string {
@@ -218,7 +223,7 @@ export function RepositoryBranchesPanel() {
   const load = useCallback(async () => {
     dispatch({ type: "load:start" });
     try {
-      const next = await tauriCall<RepositoryWorktreeState[]>("list_repository_worktrees");
+      const next = await listRepositoryWorktrees();
       dispatch({ repos: next, type: "load:success" });
     } catch (err) {
       dispatch({ error: err instanceof Error ? err.message : String(err), type: "load:error" });
@@ -235,7 +240,7 @@ export function RepositoryBranchesPanel() {
     if (!branchRef) return;
     updateRepoActionState(key, "checkout", "running");
     try {
-      const updated = await tauriCall<RepositoryWorktreeState>("checkout_repository_branch", {
+      const updated = await checkoutRepositoryBranch({
         workspace: repo.workspace,
         repo: repo.repo,
         branchRef,
@@ -264,10 +269,9 @@ export function RepositoryBranchesPanel() {
     const action = command === "fetch_repository" ? "fetch" : "pull";
     updateRepoActionState(key, action, "running");
     try {
-      const updated = await tauriCall<RepositoryWorktreeState>(command, {
-        workspace: repo.workspace,
-        repo: repo.repo,
-      });
+      const input = { workspace: repo.workspace, repo: repo.repo };
+      const updated =
+        action === "fetch" ? await fetchRepository(input) : await pullRepository(input);
       replaceRepo(updated);
       updateRepoActionState(key, action, "success");
     } catch (err) {

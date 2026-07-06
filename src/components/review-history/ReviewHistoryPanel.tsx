@@ -7,7 +7,7 @@ import {
 import { useCallback, useEffect, useReducer } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { tauriCall } from "@/lib/tauri";
+import { cancelInlineReview, listAiReviewJobs, updateAiReviewJobStatus } from "@/lib/reviewService";
 import type { AiReviewJob, AiReviewJobStatus } from "@/types";
 
 export interface ReviewHistoryPanelProps {
@@ -180,7 +180,7 @@ export function ReviewHistoryPanel({ onSelectJob }: ReviewHistoryPanelProps) {
   const load = useCallback(async () => {
     dispatch({ type: "loadStart" });
     try {
-      const next = await tauriCall<AiReviewJob[]>("list_ai_review_jobs", { limit: 100 });
+      const next = await listAiReviewJobs({ limit: 100 });
       dispatch({ type: "loadSuccess", jobs: next });
     } catch (err) {
       dispatch({ type: "loadError", error: err instanceof Error ? err.message : String(err) });
@@ -203,12 +203,12 @@ export function ReviewHistoryPanel({ onSelectJob }: ReviewHistoryPanelProps) {
   const cancelJob = async (job: AiReviewJob) => {
     dispatch({ type: "cancelStart", jobId: job.id });
     try {
-      await tauriCall("cancel_inline_review", {
+      await cancelInlineReview({
         workspace: job.workspace,
         repo: job.repo,
         id: job.prId,
       });
-      const updated = await tauriCall<AiReviewJob>("update_ai_review_job_status", {
+      const updated = await updateAiReviewJobStatus({
         jobId: job.id,
         status: "cancelled",
         threadId: job.threadId,
