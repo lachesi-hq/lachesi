@@ -18,7 +18,7 @@ const thread: AiReviewThread = {
       id: "assistant-1",
       role: "assistant",
       content:
-        "Bug: if `categoryErpId` can be missing, this path should either guard or have a regression test.",
+        "Bug: if `filterId` can be missing, this path should either guard or have a regression test.",
       createdAt: "1750076400000",
     },
     {
@@ -37,7 +37,7 @@ const reviewRun: ReviewRun = {
   workspace: "example-workspace",
   repo: "frontend-app",
   prId: 1731,
-  sourceBranch: "CB-2066-category-drilldown",
+  sourceBranch: "APP-2066-saved-view-filter",
   destinationBranch: "develop",
   status: "succeeded",
   turnKind: "initial",
@@ -46,7 +46,7 @@ const reviewRun: ReviewRun = {
   diffFingerprint: "abc123",
   threadId: "thread-1",
   summaryMarkdown:
-    "## Review\n\n🔴 Bugs / High Risk\n\n1. `buildOrdersUrlFromBudgetRow.ts:17` should guard when `categoryErpId` is missing.\n\n## Resources\n\n- [TypeScript Utility Types](https://www.typescriptlang.org/docs/handbook/utility-types.html) — Utility types reference.",
+    "## Review\n\n🔴 Bugs / High Risk\n\n1. `buildRecordsUrlFromSavedView.ts:17` should guard when `filterId` is missing.\n\n## Resources\n\n- [TypeScript Utility Types](https://www.typescriptlang.org/docs/handbook/utility-types.html) — Utility types reference.",
   evidence: [
     {
       id: "run-1-evidence-conversation",
@@ -69,18 +69,18 @@ const reviewRun: ReviewRun = {
     {
       id: "run-1-finding-1",
       fingerprint: "fingerprint-1",
-      title: "Guard missing categoryErpId before building the orders URL",
+      title: "Guard missing filterId before building the records URL",
       severity: "high",
       confidence: "high",
       category: "bug",
       status: "new",
       summary:
-        "`buildOrdersUrlFromBudgetRow.ts:17` should guard when `categoryErpId` is missing, otherwise the drill-down can still render an empty orders list for valid budgets.",
+        "`buildRecordsUrlFromSavedView.ts:17` should guard when `filterId` is missing, otherwise the saved-view drill-down can still render empty results for valid records.",
       rationale: null,
       ruleId: null,
       source: "llm",
       anchor: {
-        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
         startLine: 17,
         endLine: null,
         side: "new",
@@ -97,13 +97,13 @@ describe("buildAiReviewCommentDraftPayload", () => {
     const payload = buildAiReviewCommentDraftPayload({
       pr: {
         id: 1731,
-        title: "CB-2066 - fix category drill-down returning empty orders",
-        descriptionRaw: "Use the ERP category code in the generated orders URL.",
+        title: "APP-2066 - fix saved-view filter returning empty results",
+        descriptionRaw: "Use the stable filter id in the generated records URL.",
         state: "OPEN",
         draft: false,
         authorDisplayName: "Alex Reviewer",
         reviewers: [],
-        sourceBranch: "CB-2066-category-drilldown",
+        sourceBranch: "APP-2066-saved-view-filter",
         destinationBranch: "develop",
         createdOn: "2026-06-16T09:00:00.000Z",
         updatedOn: "2026-06-16T15:40:00.000Z",
@@ -111,9 +111,9 @@ describe("buildAiReviewCommentDraftPayload", () => {
       thread,
       branchStatus: { behind: 1, ahead: 2, behindCapped: false, aheadCapped: false },
       rawDiff: mockRawDiff,
-      jiraKeys: ["CB-2066"],
+      jiraKeys: ["APP-2066"],
       jiraBaseUrl: "https://example.atlassian.net",
-      jiraContext: "Ticket says the ERP category code is the source of truth.",
+      jiraContext: "Ticket says the stable filter id is the source of truth.",
     });
 
     expect(payload).toContain("Return ONLY JSON matching this shape");
@@ -121,20 +121,20 @@ describe("buildAiReviewCommentDraftPayload", () => {
     expect(payload).toContain("### Assistant");
     expect(payload).toContain("### Reviewer");
     expect(payload).toContain("## Diff");
-    expect(payload).toContain("CB-2066: https://example.atlassian.net/browse/CB-2066");
+    expect(payload).toContain("APP-2066: https://example.atlassian.net/browse/APP-2066");
   });
 
   it("prefers normalized findings when a structured review run is available", () => {
     const payload = buildAiReviewCommentDraftPayload({
       pr: {
         id: 1731,
-        title: "CB-2066 - fix category drill-down returning empty orders",
-        descriptionRaw: "Use the ERP category code in the generated orders URL.",
+        title: "APP-2066 - fix saved-view filter returning empty results",
+        descriptionRaw: "Use the stable filter id in the generated records URL.",
         state: "OPEN",
         draft: false,
         authorDisplayName: "Alex Reviewer",
         reviewers: [],
-        sourceBranch: "CB-2066-category-drilldown",
+        sourceBranch: "APP-2066-saved-view-filter",
         destinationBranch: "develop",
         createdOn: "2026-06-16T09:00:00.000Z",
         updatedOn: "2026-06-16T15:40:00.000Z",
@@ -147,7 +147,7 @@ describe("buildAiReviewCommentDraftPayload", () => {
     expect(payload).toContain("## Structured review findings");
     expect(payload).toContain("Fingerprint: fingerprint-1");
     expect(payload).toContain(
-      "Anchor: src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts:17 (new)",
+      "Anchor: src/app/views/utils/buildRecordsUrlFromSavedView.ts:17 (new)",
     );
     expect(payload).toContain("## Assistant summary");
     expect(payload).not.toContain("## Review conversation");
@@ -158,13 +158,13 @@ describe("normalizeAiReviewDraftComments", () => {
   it("keeps only suggestions that map to an actual changed line in the diff", () => {
     const result = normalizeAiReviewDraftComments(mockRawDiff, [
       {
-        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
         to: 17,
         from: null,
-        raw: "Please add a regression test showing `categoryErpId` is always present here.",
+        raw: "Please add a regression test showing `filterId` is always present here.",
       },
       {
-        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
         to: 9999,
         from: null,
         raw: "This line does not exist in the diff.",
@@ -176,19 +176,19 @@ describe("normalizeAiReviewDraftComments", () => {
         raw: "Unknown file path.",
       },
       {
-        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
         to: 17,
         from: null,
-        raw: "Please add a regression test showing `categoryErpId` is always present here.",
+        raw: "Please add a regression test showing `filterId` is always present here.",
       },
     ]);
 
     expect(result.comments).toEqual([
       {
-        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
         to: 17,
         from: null,
-        raw: "Please add a regression test showing `categoryErpId` is always present here.",
+        raw: "Please add a regression test showing `filterId` is always present here.",
       },
     ]);
     expect(result.skipped).toBe(3);
@@ -199,19 +199,19 @@ describe("linkAiReviewDraftCommentsToFindings", () => {
   it("links normalized draft comments back to the matching structured finding", () => {
     const linked = linkAiReviewDraftCommentsToFindings(reviewRun, [
       {
-        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
         to: 17,
         from: null,
-        raw: "Guard the `categoryErpId` path here or add a regression test for the empty-orders case.",
+        raw: "Guard the `filterId` path here or add a regression test for the empty-results case.",
       },
     ]);
 
     expect(linked).toEqual([
       {
-        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
         to: 17,
         from: null,
-        raw: "Guard the `categoryErpId` path here or add a regression test for the empty-orders case.",
+        raw: "Guard the `filterId` path here or add a regression test for the empty-results case.",
         findingRef: {
           reviewRunId: "run-1",
           findingId: "run-1-finding-1",
@@ -225,7 +225,7 @@ describe("linkAiReviewDraftCommentsToFindings", () => {
   it("leaves unmatched comments unlinked", () => {
     const linked = linkAiReviewDraftCommentsToFindings(reviewRun, [
       {
-        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
         to: 42,
         from: null,
         raw: "This comment does not map cleanly to any stored finding.",

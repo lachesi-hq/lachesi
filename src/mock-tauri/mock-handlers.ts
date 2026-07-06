@@ -31,6 +31,11 @@ import {
 
 type Handler = (args?: Record<string, unknown>) => unknown;
 
+interface SavedReview {
+  content: string;
+  generatedAt: string;
+}
+
 let mockCommentId = 100000;
 let mockPullRequestDetailState = mockPullRequestDetail;
 const mockFixStates = new Map<string, AiReviewFixState>();
@@ -307,6 +312,53 @@ function createMessage(role: "user" | "assistant", content: string): AiReviewMes
     role,
     content,
     createdAt: String(Date.now()),
+  };
+}
+
+function createSavedReviewStore(
+  args: Record<string, unknown> | undefined,
+  content: string,
+): SavedReview {
+  const key = reviewKey(args);
+  const now = String(Date.now());
+  const threadId = nowId("thread");
+  const review: SavedReview = {
+    content,
+    generatedAt: now,
+  };
+  setReviewStore(key, {
+    activeThreadId: threadId,
+    threads: [
+      {
+        id: threadId,
+        title: "AI review",
+        createdAt: now,
+        updatedAt: now,
+        claudeSessionId: `mock-session-${threadId}`,
+        messages: [createMessage("assistant", content)],
+      },
+    ],
+    reviewRuns: getReviewStore(key)?.reviewRuns ?? [],
+  });
+  return review;
+}
+
+function loadSavedReviewFromStore(args: Record<string, unknown> | undefined): SavedReview | null {
+  const store = getReviewStore(reviewKey(args));
+  const thread = store?.threads[store.threads.length - 1];
+  if (!thread) return null;
+  let message: AiReviewMessage | null = null;
+  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+    const candidate = thread.messages[index];
+    if (candidate?.role === "assistant") {
+      message = candidate;
+      break;
+    }
+  }
+  if (!message) return null;
+  return {
+    content: message.content,
+    generatedAt: message.createdAt,
   };
 }
 
@@ -739,6 +791,27 @@ export const mockHandlers: Record<string, Handler> = {
     error: null,
   }),
   list_ai_review_jobs: () => mockReviewJobs,
+  create_ai_review_job: (args) => {
+    const now = new Date().toISOString();
+    const job: AiReviewJob = {
+      id: nowId("job"),
+      workspace: String(args?.workspace ?? "example-workspace"),
+      repo: String(args?.repo ?? "frontend-app"),
+      prId: Number(args?.prId ?? args?.id ?? 0),
+      prTitle: String(args?.prTitle ?? `PR #${String(args?.prId ?? args?.id ?? "")}`),
+      sourceBranch: String(args?.sourceBranch ?? "feature/review-panel"),
+      destinationBranch: String(args?.destinationBranch ?? "develop"),
+      status: "queued",
+      trigger: String(args?.trigger ?? "manual"),
+      threadId: null,
+      error: null,
+      createdAt: now,
+      startedAt: null,
+      finishedAt: null,
+    };
+    mockReviewJobs = [job, ...mockReviewJobs];
+    return job;
+  },
   update_ai_review_job_status: (args) => {
     const jobId = String(args?.jobId ?? "");
     const next = mockReviewJobs.find((job) => job.id === jobId);
@@ -763,6 +836,7 @@ export const mockHandlers: Record<string, Handler> = {
   get_current_user: () => ({ displayName: "Alex Reviewer", accountId: "alex" }),
   save_config: () => null,
   save_credentials: () => null,
+  save_github_token: () => null,
   clear_credentials: () => null,
   list_review_terminals: () => [
     { id: "wezterm", label: "WezTerm", available: true },
@@ -864,6 +938,19 @@ export const mockHandlers: Record<string, Handler> = {
   },
   delete_comment: () => null,
   launch_claude_review: () => null,
+  run_inline_review: (args) => {
+    const payload = String(args?.payload ?? "").trim();
+    const content =
+      payload.length > 0
+        ? defaultInitialReviewContent()
+        : "## AI Review\n\nNo review payload was provided.";
+    return createSavedReviewStore(args, content);
+  },
+  load_saved_review: (args) => loadSavedReviewFromStore(args),
+  delete_saved_review: (args) => {
+    deleteReviewStore(reviewKey(args));
+    return null;
+  },
   load_ai_review_store: (args) => getReviewStore(reviewKey(args)) ?? null,
   create_ai_review_thread: (args) => {
     const key = reviewKey(args);

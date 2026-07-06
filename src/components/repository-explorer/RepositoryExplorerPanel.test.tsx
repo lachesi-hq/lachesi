@@ -31,7 +31,7 @@ describe("RepositoryExplorerPanel", () => {
 
     expect(within(fileTree).getByRole("button", { name: /localDraft\.ts/ })).toBeInTheDocument();
     expect(
-      within(fileTree).queryByRole("button", { name: /OrderTable\.tsx/ }),
+      within(fileTree).queryByRole("button", { name: /RecordTable\.tsx/ }),
     ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "4 changed" }));
@@ -140,7 +140,7 @@ describe("RepositoryExplorerPanel", () => {
       expect(findInput).toHaveFocus();
     });
 
-    await user.type(findInput, "OrderTable");
+    await user.type(findInput, "RecordTable");
 
     await waitFor(() => {
       expect(screen.getByText("1/3")).toBeInTheDocument();
