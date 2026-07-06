@@ -66,6 +66,7 @@ pub struct ReviewRequest {
     pub pr_id: u32,
     pub repo_path: Option<PathBuf>,
     pub output_format: ReviewOutputFormat,
+    pub profile: Option<String>,
     pub evidence_only: bool,
     pub fail_on_findings: bool,
     pub session_instruction: Option<String>,
@@ -129,6 +130,7 @@ lachesi review \
   [--config <path>] \
   [--local-config <path>] \
   [--format markdown|json|jsonl] \
+  [--profile <name>] \
   [--output <path>] \
   [--evidence-only] \
   [--fail-on-findings] \
@@ -143,6 +145,8 @@ Defaults:
 - `--format markdown`
 - repo path comes from app config, explicit `--repo-path`, or discovery
 - `.lachesi.yaml` is loaded from repo root when present
+- `--profile` overrides `review.profile`; if omitted, `review.profile` or a
+  `default` profile is used when configured
 - local `.lachesi.local.yaml` is loaded when present
 - manual publication is not attempted
 - findings do not fail the process unless `--fail-on-findings` is set
@@ -181,6 +185,7 @@ It should include:
 - findings grouped by severity
 - file/line anchors when present
 - evidence and analyzer warnings
+- selected review profile, when one was used
 - footer with run id and schema version
 
 ### JSON
@@ -200,6 +205,7 @@ The top-level JSON object should be:
     "id": "run-1",
     "schemaVersion": "v0.1",
     "provider": "bitbucket",
+    "reviewProfile": "agentic-balanced",
     "findings": [],
     "evidence": []
   }

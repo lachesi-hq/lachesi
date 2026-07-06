@@ -361,6 +361,7 @@ export interface ReviewRun {
   destinationBranch: string;
   status: AiReviewRunStatus;
   turnKind: AiReviewTurnKind;
+  reviewProfile: string | null;
   createdAt: string;
   finishedAt: string | null;
   diffFingerprint: string;
@@ -557,6 +558,7 @@ export type RepoReviewSeverity = "info" | "low" | "medium" | "high" | "critical"
 export type RepoReviewConfidence = "low" | "medium" | "high";
 export type RepoReviewPublicationMode = "inline" | "file" | "general" | "localOnly";
 export type RepoPolicyEnforcement = "prompt" | "analyzer" | "ast" | "manual";
+export type RepoProfileAnalyzerRequirement = "optional" | "required" | "disabled";
 
 export interface RepoPathFilters {
   include: string[];
@@ -566,6 +568,7 @@ export interface RepoPathFilters {
 export interface RepoReviewConfig {
   version: string;
   review?: {
+    profile?: string | null;
     mode?: RepoReviewMode | null;
     prompt?: { extend?: string | null } | null;
     findings?: {
@@ -573,6 +576,16 @@ export interface RepoReviewConfig {
       requireAnchors?: boolean | null;
     } | null;
   } | null;
+  profiles: Record<
+    string,
+    {
+      mode?: RepoReviewMode | null;
+      minSeverity?: RepoReviewSeverity | null;
+      prompt?: { extend?: string | null } | null;
+      policyPacks: string[];
+      analyzers: Record<string, RepoProfileAnalyzerRequirement>;
+    }
+  >;
   paths?: RepoPathFilters | null;
   policy?: {
     packs: string[];
@@ -646,6 +659,7 @@ export interface RepoReviewConfigLoadResult {
   configPath: string;
   exists: boolean;
   config: RepoReviewConfig | null;
+  selectedProfile: string | null;
   loadedPolicyPacks: LoadedPolicyPack[];
   warnings: RepoConfigValidationMessage[];
   errors: RepoConfigValidationMessage[];

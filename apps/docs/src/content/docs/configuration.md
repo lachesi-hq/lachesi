@@ -25,9 +25,18 @@ Lachesi can read `.lachesi.yaml` from a configured local repository.
 ```yaml
 version: "0.1"
 review:
+  profile: frontend-strict
   mode: balanced
   findings:
     minSeverity: low
+profiles:
+  frontend-strict:
+    mode: strict
+    minSeverity: medium
+    policyPacks:
+      - ./lachesi-policies/react-saas
+    analyzers:
+      tsc: required
 paths:
   include:
     - "src/**"
@@ -45,4 +54,4 @@ publish:
   requireManualSubmit: true
 ```
 
-Policy packs can contribute prompt extensions, rules, path rules, and analyzer defaults from local directories. Repo config and policy packs should not contain credentials, tokens, private URLs, or other secrets.
+Policy packs can contribute prompt extensions, rules, path rules, profiles, and analyzer defaults from local directories. Profiles can be selected from the desktop AI review panel per run. Repo config and policy packs should not contain credentials, tokens, private URLs, or other secrets.

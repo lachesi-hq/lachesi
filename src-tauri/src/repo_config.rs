@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -16,6 +16,8 @@ pub struct RepoReviewConfig {
     #[serde(default)]
     pub review: Option<ReviewConfig>,
     #[serde(default)]
+    pub profiles: BTreeMap<String, ReviewProfileConfig>,
+    #[serde(default)]
     pub paths: Option<PathFilters>,
     #[serde(default)]
     pub policy: Option<PolicyConfig>,
@@ -29,11 +31,37 @@ pub struct RepoReviewConfig {
 #[serde(rename_all = "camelCase")]
 pub struct ReviewConfig {
     #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
     pub mode: Option<ReviewMode>,
     #[serde(default)]
     pub prompt: Option<PromptConfig>,
     #[serde(default)]
     pub findings: Option<FindingConfig>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewProfileConfig {
+    #[serde(default)]
+    pub mode: Option<ReviewMode>,
+    #[serde(default)]
+    pub min_severity: Option<ReviewSeverity>,
+    #[serde(default)]
+    pub prompt: Option<PromptConfig>,
+    #[serde(default)]
+    pub policy_packs: Vec<String>,
+    #[serde(default)]
+    pub analyzers: BTreeMap<String, ProfileAnalyzerRequirement>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProfileAnalyzerRequirement {
+    #[default]
+    Optional,
+    Required,
+    Disabled,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -243,6 +271,7 @@ pub struct RepoReviewConfigLoadResult {
     pub config_path: String,
     pub exists: bool,
     pub config: Option<RepoReviewConfig>,
+    pub selected_profile: Option<String>,
     pub loaded_policy_packs: Vec<LoadedPolicyPack>,
     pub warnings: Vec<RepoConfigValidationMessage>,
     pub errors: Vec<RepoConfigValidationMessage>,
@@ -259,6 +288,8 @@ struct PolicyPackConfig {
     review: Option<ReviewConfig>,
     #[serde(default)]
     policy: Option<PolicyConfig>,
+    #[serde(default)]
+    profiles: BTreeMap<String, ReviewProfileConfig>,
     #[serde(default)]
     analyzers: BTreeMap<String, AnalyzerConfig>,
 }
@@ -278,6 +309,13 @@ where
 }
 
 pub fn load_from_repo_path(repo_path: &Path) -> Result<RepoReviewConfigLoadResult, String> {
+    load_from_repo_path_with_profile(repo_path, None)
+}
+
+pub fn load_from_repo_path_with_profile(
+    repo_path: &Path,
+    profile_override: Option<&str>,
+) -> Result<RepoReviewConfigLoadResult, String> {
     if !repo_path.is_dir() {
         return Err(format!(
             "Repository path does not exist or is not a directory: {}",
@@ -292,6 +330,7 @@ pub fn load_from_repo_path(repo_path: &Path) -> Result<RepoReviewConfigLoadResul
             config_path: config_path.display().to_string(),
             exists: false,
             config: None,
+            selected_profile: None,
             loaded_policy_packs: Vec::new(),
             warnings: Vec::new(),
             errors: Vec::new(),
@@ -300,13 +339,19 @@ pub fn load_from_repo_path(repo_path: &Path) -> Result<RepoReviewConfigLoadResul
 
     let contents = fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
-    Ok(load_from_str(repo_path, &config_path, &contents))
+    Ok(load_from_str(
+        repo_path,
+        &config_path,
+        &contents,
+        profile_override,
+    ))
 }
 
 fn load_from_str(
     repo_path: &Path,
     config_path: &Path,
     contents: &str,
+    profile_override: Option<&str>,
 ) -> RepoReviewConfigLoadResult {
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
@@ -323,6 +368,7 @@ fn load_from_str(
                 config_path,
                 true,
                 None,
+                None,
                 Vec::new(),
                 warnings,
                 errors,
@@ -334,16 +380,29 @@ fn load_from_str(
     errors.extend(forbidden_field_errors(config_path, &value));
 
     let mut loaded_policy_packs = Vec::new();
+    let mut selected_profile = None;
     let config = match serde_yaml::from_value::<RepoReviewConfig>(value) {
         Ok(mut config) => {
-            validate_config(config_path, &config, &mut errors);
-            loaded_policy_packs = load_policy_packs(
+            let mut loaded_pack_paths = BTreeSet::new();
+            loaded_policy_packs.extend(load_policy_packs(
                 repo_path,
                 config_path,
                 &mut config,
                 &mut warnings,
                 &mut errors,
-            );
+                &mut loaded_pack_paths,
+            ));
+            selected_profile =
+                apply_review_profile(config_path, &mut config, profile_override, &mut warnings);
+            loaded_policy_packs.extend(load_policy_packs(
+                repo_path,
+                config_path,
+                &mut config,
+                &mut warnings,
+                &mut errors,
+                &mut loaded_pack_paths,
+            ));
+            validate_config(config_path, &config, &mut errors);
             Some(config)
         }
         Err(error) => {
@@ -360,6 +419,7 @@ fn load_from_str(
         config_path,
         true,
         config,
+        selected_profile,
         loaded_policy_packs,
         warnings,
         errors,
@@ -393,12 +453,97 @@ fn validate_config(
     }
 }
 
+fn apply_review_profile(
+    config_path: &Path,
+    config: &mut RepoReviewConfig,
+    profile_override: Option<&str>,
+    warnings: &mut Vec<RepoConfigValidationMessage>,
+) -> Option<String> {
+    let requested_profile = profile_override
+        .map(str::trim)
+        .filter(|profile| !profile.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            config
+                .review
+                .as_ref()
+                .and_then(|review| review.profile.as_deref())
+                .map(str::trim)
+                .filter(|profile| !profile.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            config
+                .profiles
+                .contains_key("default")
+                .then(|| "default".to_string())
+        });
+
+    let Some(profile_id) = requested_profile else {
+        return None;
+    };
+    let Some(profile) = config.profiles.get(&profile_id).cloned() else {
+        warnings.push(message(
+            config_path,
+            format!("Review profile `{profile_id}` was not found; using base review config."),
+        ));
+        return None;
+    };
+
+    let review = config.review.get_or_insert_with(ReviewConfig::default);
+    review.profile = Some(profile_id.clone());
+    if let Some(mode) = profile.mode {
+        review.mode = Some(mode);
+    }
+    if let Some(min_severity) = profile.min_severity {
+        review
+            .findings
+            .get_or_insert_with(FindingConfig::default)
+            .min_severity = Some(min_severity);
+    }
+    merge_prompt_config(&mut review.prompt, profile.prompt);
+
+    if !profile.policy_packs.is_empty() {
+        config
+            .policy
+            .get_or_insert_with(PolicyConfig::default)
+            .packs
+            .extend(profile.policy_packs);
+    }
+
+    for (id, requirement) in profile.analyzers {
+        match requirement {
+            ProfileAnalyzerRequirement::Required => {
+                if let Some(analyzer) = config.analyzers.get_mut(&id) {
+                    analyzer.enabled = true;
+                } else {
+                    warnings.push(message(
+                        config_path,
+                        format!(
+                            "Review profile `{profile_id}` requires analyzer `{id}`, but no analyzer config is available."
+                        ),
+                    ));
+                }
+            }
+            ProfileAnalyzerRequirement::Disabled => {
+                if let Some(analyzer) = config.analyzers.get_mut(&id) {
+                    analyzer.enabled = false;
+                }
+            }
+            ProfileAnalyzerRequirement::Optional => {}
+        }
+    }
+
+    Some(profile_id)
+}
+
 fn load_policy_packs(
     repo_path: &Path,
     config_path: &Path,
     config: &mut RepoReviewConfig,
     warnings: &mut Vec<RepoConfigValidationMessage>,
     errors: &mut Vec<RepoConfigValidationMessage>,
+    loaded_pack_paths: &mut BTreeSet<String>,
 ) -> Vec<LoadedPolicyPack> {
     let Some(policy) = config.policy.as_ref() else {
         return Vec::new();
@@ -417,12 +562,20 @@ fn load_policy_packs(
     for pack_ref in pack_refs {
         let resolved_path = resolve_pack_manifest_path(repo_path, &pack_ref);
         let Some(pack_path) = resolved_path else {
+            let missing_key = format!("missing:{pack_ref}");
+            if !loaded_pack_paths.insert(missing_key) {
+                continue;
+            }
             warnings.push(message(
                 config_path,
                 format!("Policy pack `{pack_ref}` was not found."),
             ));
             continue;
         };
+        let pack_path_key = pack_path.display().to_string();
+        if !loaded_pack_paths.insert(pack_path_key.clone()) {
+            continue;
+        }
 
         let value = match fs::read_to_string(&pack_path)
             .map_err(|error| {
@@ -474,7 +627,7 @@ fn load_policy_packs(
         loaded.push(LoadedPolicyPack {
             id: pack_id,
             name: pack_name,
-            path: pack_path.display().to_string(),
+            path: pack_path_key,
         });
     }
 
@@ -542,6 +695,8 @@ fn merge_policy_pack(
         target.suppressions.extend(pack_policy.suppressions);
     }
 
+    config.profiles.extend(pack.profiles);
+
     for (id, analyzer) in pack.analyzers {
         config.analyzers.entry(id).or_insert(analyzer);
     }
@@ -579,6 +734,7 @@ fn result(
     config_path: &Path,
     exists: bool,
     config: Option<RepoReviewConfig>,
+    selected_profile: Option<String>,
     loaded_policy_packs: Vec<LoadedPolicyPack>,
     warnings: Vec<RepoConfigValidationMessage>,
     errors: Vec<RepoConfigValidationMessage>,
@@ -588,6 +744,7 @@ fn result(
         config_path: config_path.display().to_string(),
         exists,
         config,
+        selected_profile,
         loaded_policy_packs,
         warnings,
         errors,
@@ -635,9 +792,31 @@ fn collect_unknown_fields(
         let next_context = next_context(context, key);
         if next_context == Some("analyzerMap") {
             collect_analyzer_fields(config_path, child, &child_path, warnings);
+        } else if next_context == Some("profileMap") {
+            collect_profile_fields(config_path, child, &child_path, warnings);
+        } else if next_context == Some("profileAnalyzerMap") {
+            // Analyzer requirement ids are user-defined keys.
         } else {
             collect_unknown_fields(config_path, child, &child_path, next_context, warnings);
         }
+    }
+}
+
+fn collect_profile_fields(
+    config_path: &Path,
+    value: &Value,
+    path: &str,
+    warnings: &mut Vec<RepoConfigValidationMessage>,
+) {
+    let Value::Mapping(mapping) = value else {
+        return;
+    };
+    for (key, child) in mapping {
+        let Some(profile_id) = key.as_str() else {
+            continue;
+        };
+        let profile_path = format!("{path}.{profile_id}");
+        collect_unknown_fields(config_path, child, &profile_path, Some("profile"), warnings);
     }
 }
 
@@ -670,12 +849,14 @@ fn known_keys(context: Option<&str>, key: &str) -> Option<&'static [&'static str
         None => Some(&[
             "version",
             "review",
+            "profiles",
             "paths",
             "policy",
             "analyzers",
             "publish",
         ]),
-        Some("review") => Some(&["mode", "prompt", "findings"]),
+        Some("review") => Some(&["profile", "mode", "prompt", "findings"]),
+        Some("profile") => Some(&["mode", "minSeverity", "prompt", "policyPacks", "analyzers"]),
         Some("prompt") => Some(&["extend"]),
         Some("findings") => Some(&["minSeverity", "requireAnchors"]),
         Some("paths") | Some("appliesTo") => Some(&["include", "exclude"]),
@@ -725,6 +906,10 @@ fn known_keys(context: Option<&str>, key: &str) -> Option<&'static [&'static str
             let _ = key;
             None
         }
+        Some("profileMap") | Some("profileAnalyzerMap") => {
+            let _ = key;
+            None
+        }
         _ => None,
     }
 }
@@ -732,12 +917,15 @@ fn known_keys(context: Option<&str>, key: &str) -> Option<&'static [&'static str
 fn next_context(context: Option<&str>, key: &str) -> Option<&'static str> {
     match (context, key) {
         (None, "review") => Some("review"),
+        (None, "profiles") => Some("profileMap"),
         (None, "paths") => Some("paths"),
         (None, "policy") => Some("policy"),
         (None, "analyzers") => Some("analyzerMap"),
         (None, "publish") => Some("publish"),
         (Some("review"), "prompt") => Some("prompt"),
         (Some("review"), "findings") => Some("findings"),
+        (Some("profile"), "prompt") => Some("prompt"),
+        (Some("profile"), "analyzers") => Some("profileAnalyzerMap"),
         (Some("policy"), "sources") => Some("policySource"),
         (Some("policy"), "rules") => Some("rule"),
         (Some("policy"), "pathRules") => Some("pathRule"),
@@ -805,7 +993,7 @@ fn collect_forbidden_fields(
 
 #[cfg(test)]
 mod tests {
-    use super::{load_from_repo_path, load_from_str};
+    use super::{load_from_repo_path, load_from_str, RepoReviewConfigLoadResult};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -818,6 +1006,18 @@ mod tests {
         let path = std::env::temp_dir().join(format!("lachesi-repo-config-test-{nonce}"));
         fs::create_dir_all(&path).expect("create temp repo");
         path
+    }
+
+    fn load_test_config(repo: &std::path::Path, contents: &str) -> RepoReviewConfigLoadResult {
+        load_from_str(repo, &repo.join(".lachesi.yaml"), contents, None)
+    }
+
+    fn load_test_config_with_profile(
+        repo: &std::path::Path,
+        contents: &str,
+        profile: &str,
+    ) -> RepoReviewConfigLoadResult {
+        load_from_str(repo, &repo.join(".lachesi.yaml"), contents, Some(profile))
     }
 
     #[test]
@@ -860,9 +1060,8 @@ publish:
     #[test]
     fn unknown_fields_warn_without_blocking() {
         let repo = temp_repo();
-        let result = load_from_str(
+        let result = load_test_config(
             &repo,
-            &repo.join(".lachesi.yaml"),
             r#"
 version: 0.1
 x-experiment: true
@@ -880,9 +1079,8 @@ review:
     #[test]
     fn unsupported_version_is_blocking_error() {
         let repo = temp_repo();
-        let result = load_from_str(
+        let result = load_test_config(
             &repo,
-            &repo.join(".lachesi.yaml"),
             r#"
 version: 2.0
 "#,
@@ -897,9 +1095,8 @@ version: 2.0
     #[test]
     fn credential_fields_are_blocking_errors() {
         let repo = temp_repo();
-        let result = load_from_str(
+        let result = load_test_config(
             &repo,
-            &repo.join(".lachesi.yaml"),
             r#"
 version: 0.1
 token: abc123
@@ -913,9 +1110,8 @@ token: abc123
     #[test]
     fn enabled_analyzer_requires_command() {
         let repo = temp_repo();
-        let result = load_from_str(
+        let result = load_test_config(
             &repo,
-            &repo.join(".lachesi.yaml"),
             r#"
 version: 0.1
 analyzers:
@@ -928,6 +1124,105 @@ analyzers:
         assert!(result.errors[0]
             .message
             .contains("Analyzer `tsc` is enabled but has no command"));
+    }
+
+    #[test]
+    fn applies_default_review_profile_when_present() {
+        let repo = temp_repo();
+        let result = load_test_config(
+            &repo,
+            r#"
+version: 0.1
+profiles:
+  default:
+    mode: strict
+    minSeverity: medium
+    prompt:
+      extend: Default profile prompt.
+    analyzers:
+      tsc: required
+analyzers:
+  tsc:
+    enabled: false
+    command: "pnpm typecheck"
+"#,
+        );
+
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.selected_profile.as_deref(), Some("default"));
+        let config = result.config.expect("config");
+        let review = config.review.expect("review");
+        assert_eq!(review.profile.as_deref(), Some("default"));
+        assert_eq!(review.mode, Some(super::ReviewMode::Strict));
+        assert_eq!(
+            review.findings.and_then(|findings| findings.min_severity),
+            Some(super::ReviewSeverity::Medium)
+        );
+        assert_eq!(
+            review.prompt.and_then(|prompt| prompt.extend),
+            Some("Default profile prompt.".to_string())
+        );
+        assert_eq!(
+            config.analyzers.get("tsc").map(|analyzer| analyzer.enabled),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn applies_explicit_review_profile_override() {
+        let repo = temp_repo();
+        let result = load_test_config_with_profile(
+            &repo,
+            r#"
+version: 0.1
+review:
+  profile: fast-profile
+profiles:
+  fast-profile:
+    mode: fast
+  strict-profile:
+    mode: strict
+    policyPacks:
+      - ./packs/strict
+"#,
+            "strict-profile",
+        );
+
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.iter().any(|warning| warning
+            .message
+            .contains("Policy pack `./packs/strict` was not found")));
+        assert_eq!(result.selected_profile.as_deref(), Some("strict-profile"));
+        let config = result.config.expect("config");
+        assert_eq!(
+            config.review.and_then(|review| review.mode),
+            Some(super::ReviewMode::Strict)
+        );
+    }
+
+    #[test]
+    fn missing_review_profile_warns_and_keeps_base_config() {
+        let repo = temp_repo();
+        let result = load_test_config(
+            &repo,
+            r#"
+version: 0.1
+review:
+  profile: missing-profile
+  mode: fast
+"#,
+        );
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.selected_profile, None);
+        assert!(result.warnings[0]
+            .message
+            .contains("Review profile `missing-profile` was not found"));
+        assert_eq!(
+            result.config.unwrap().review.and_then(|review| review.mode),
+            Some(super::ReviewMode::Fast)
+        );
     }
 
     #[test]
@@ -963,9 +1258,8 @@ analyzers:
         )
         .expect("write pack");
 
-        let result = load_from_str(
+        let result = load_test_config(
             &repo,
-            &repo.join(".lachesi.yaml"),
             r#"
 version: 0.1
 review:
@@ -1026,9 +1320,8 @@ policy:
         )
         .expect("write pack");
 
-        let result = load_from_str(
+        let result = load_test_config(
             &repo,
-            &repo.join(".lachesi.yaml"),
             r#"
 version: 0.1
 policy:
@@ -1048,9 +1341,8 @@ policy:
     #[test]
     fn missing_policy_pack_warns_without_blocking() {
         let repo = temp_repo();
-        let result = load_from_str(
+        let result = load_test_config(
             &repo,
-            &repo.join(".lachesi.yaml"),
             r#"
 version: 0.1
 policy:
@@ -1080,9 +1372,8 @@ token: should-not-be-here
         )
         .expect("write pack");
 
-        let result = load_from_str(
+        let result = load_test_config(
             &repo,
-            &repo.join(".lachesi.yaml"),
             r#"
 version: 0.1
 policy:

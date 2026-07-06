@@ -659,6 +659,8 @@ export const mockHandlers: Record<string, Handler> = {
     configPath: `${String(args?.repoPath ?? "")}/.lachesi.yaml`,
     exists: false,
     config: null,
+    selectedProfile: null,
+    loadedPolicyPacks: [],
     warnings: [],
     errors: [],
   }),
@@ -1026,6 +1028,7 @@ export const mockHandlers: Record<string, Handler> = {
     const displayMessage = String(args?.displayMessage ?? "").trim();
     const aiProvider = String(args?.aiProvider ?? "claude") === "codex" ? "codex" : "claude";
     const providerLabel = aiProvider === "codex" ? "Codex" : "Claude";
+    const reviewProfile = String(args?.reviewProfile ?? "").trim();
     const nextStore: AiReviewStore = {
       activeThreadId: threadId,
       threads: [
@@ -1052,6 +1055,7 @@ export const mockHandlers: Record<string, Handler> = {
         `Reviewing PR: ${title}`,
         `Saving output to review thread ${threadId}.`,
         `AI provider: ${providerLabel}`,
+        ...(reviewProfile ? [`Review profile: ${reviewProfile}`] : []),
         ...(aiProvider === "codex" && args?.codexModel
           ? [`Codex model: ${String(args.codexModel)}`]
           : []),

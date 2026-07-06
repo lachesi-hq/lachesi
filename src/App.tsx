@@ -56,6 +56,7 @@ import type {
   RepoRef,
   ReviewProvider,
   ReviewFindingPublicationEvent,
+  RepoReviewConfigLoadResult,
 } from "@/types";
 import { repoKey } from "@/types";
 
@@ -92,6 +93,8 @@ export default function App() {
   const [reviewPanelExpanded, setReviewPanelExpanded] = useState(false);
   const [aiReviewContext, setAiReviewContext] = useState<AiReviewContext | null>(null);
   const [backgroundReviewPrKey, setBackgroundReviewPrKey] = useState<string | null>(null);
+  const [reviewProfiles, setReviewProfiles] = useState<string[]>([]);
+  const [selectedReviewProfile, setSelectedReviewProfile] = useState("");
   const pendingReviewThreadIdRef = useRef<string | null>(null);
 
   const reviewProvider = config?.reviewProvider ?? "bitbucket";
@@ -130,6 +133,40 @@ export default function App() {
   );
   const aiReviewStore = aiReview.store;
   const setActiveAiReviewThread = aiReview.setActiveThread;
+
+  useEffect(() => {
+    const repoPath = activeRepo?.localPath?.trim();
+    if (!repoPath) {
+      setReviewProfiles([]);
+      setSelectedReviewProfile("");
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await tauriCall<RepoReviewConfigLoadResult>("validate_repo_review_config", {
+          repoPath,
+        });
+        if (cancelled) return;
+        const profiles = Object.keys(result.config?.profiles ?? {});
+        setReviewProfiles(profiles);
+        setSelectedReviewProfile((current) => {
+          if (current && profiles.includes(current)) return current;
+          return result.selectedProfile ?? "";
+        });
+      } catch {
+        if (!cancelled) {
+          setReviewProfiles([]);
+          setSelectedReviewProfile("");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRepo?.localPath]);
 
   const selectPullRequest = useCallback((pr: { workspace: string; repo: string; id: number }) => {
     setRepositoriesPanelOpen(false);
@@ -194,6 +231,7 @@ export default function App() {
           repoConfig,
           jiraBaseUrl: config?.jiraBaseUrl ?? null,
           jiraContextEnabled: Boolean(config?.hasJira && config?.jiraBaseUrl),
+          reviewProfile: null,
         });
         job = await tauriCall<AiReviewJob>("create_ai_review_job", {
           workspace: pr.workspace,
@@ -217,6 +255,7 @@ export default function App() {
           claudeEffort: config?.claudeEffort ?? null,
           codexModel: config?.codexModel ?? null,
           codexEffort: config?.codexEffort ?? null,
+          reviewProfile: null,
         });
         await updateJob("running", started.threadId);
 
@@ -581,6 +620,7 @@ export default function App() {
     const { prompt, warnings } = await resolveReviewPrompt(
       `${activeSel.workspace}/${activeSel.repo}`,
       activeRepo?.localPath,
+      selectedReviewProfile || null,
     );
     if (warnings.length > 0) {
       console.warn("Lachesi repo config warnings:", warnings);
@@ -659,7 +699,12 @@ export default function App() {
   const handleRunInlineReview = (
     payload: string,
     displayMessage?: string | null,
-    options: { reviewKind?: "lineQuestion"; threadTitle?: string; skipAnalyzers?: boolean } = {},
+    options: {
+      reviewKind?: "lineQuestion";
+      threadTitle?: string;
+      skipAnalyzers?: boolean;
+      reviewProfile?: string | null;
+    } = {},
   ) => {
     if (!activeSel || !aiReviewContext) return;
     const selectionForReview = activeSel;
@@ -704,6 +749,7 @@ export default function App() {
           claudeEffort: config?.claudeEffort ?? null,
           codexModel: config?.codexModel ?? null,
           codexEffort: config?.codexEffort ?? null,
+          reviewProfile: options.reviewProfile ?? null,
         });
 
         let finalState: AiReviewRunState | null = null;
@@ -761,7 +807,9 @@ export default function App() {
           codexEffort: config?.codexEffort ?? null,
         });
       } else {
-        handleRunInlineReview(request.payload, request.displayMessage);
+        handleRunInlineReview(request.payload, request.displayMessage, {
+          reviewProfile: selectedReviewProfile || null,
+        });
       }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
@@ -1122,6 +1170,9 @@ export default function App() {
               aiProvider={config?.aiProvider ?? "claude"}
               loading={aiReview.loading}
               error={aiReview.error}
+              reviewProfiles={reviewProfiles}
+              selectedReviewProfile={selectedReviewProfile}
+              onReviewProfileChange={setSelectedReviewProfile}
               onRun={aiReviewContext ? handleRunNewReview : undefined}
               onAsk={aiReviewContext ? handleAskClaude : undefined}
               onReply={aiReviewContext ? handleReplyToReview : undefined}

@@ -252,6 +252,8 @@ pub struct ReviewRun {
     pub destination_branch: String,
     pub status: AiReviewRunStatus,
     pub turn_kind: AiReviewTurnKind,
+    #[serde(default)]
+    pub review_profile: Option<String>,
     pub created_at: String,
     pub finished_at: Option<String>,
     pub diff_fingerprint: String,
@@ -735,8 +737,11 @@ fn default_analyzer_specs(repo_path: &Path) -> Vec<AnalyzerSpec> {
     specs
 }
 
-fn configured_analyzer_specs(repo_path: &Path) -> Result<Vec<AnalyzerSpec>, String> {
-    let config = repo_config::load_from_repo_path(repo_path)?;
+fn configured_analyzer_specs_with_profile(
+    repo_path: &Path,
+    review_profile: Option<&str>,
+) -> Result<Vec<AnalyzerSpec>, String> {
+    let config = repo_config::load_from_repo_path_with_profile(repo_path, review_profile)?;
     if !config.errors.is_empty() {
         return Err(config
             .errors
@@ -769,8 +774,11 @@ fn configured_analyzer_specs(repo_path: &Path) -> Result<Vec<AnalyzerSpec>, Stri
     Ok(specs)
 }
 
-fn analyzer_specs(repo_path: &Path) -> Result<Vec<AnalyzerSpec>, String> {
-    let configured = configured_analyzer_specs(repo_path)?;
+fn analyzer_specs_with_profile(
+    repo_path: &Path,
+    review_profile: Option<&str>,
+) -> Result<Vec<AnalyzerSpec>, String> {
+    let configured = configured_analyzer_specs_with_profile(repo_path, review_profile)?;
     if configured.is_empty() {
         Ok(default_analyzer_specs(repo_path))
     } else {
@@ -1752,6 +1760,7 @@ fn materialize_review_run(
     destination_branch: &str,
     thread_id: &str,
     turn_kind: AiReviewTurnKind,
+    review_profile: Option<&str>,
     created_at: &str,
     finished_at: &str,
     snapshot_payload: &str,
@@ -1814,6 +1823,7 @@ fn materialize_review_run(
         destination_branch: destination_branch.to_string(),
         status: AiReviewRunStatus::Succeeded,
         turn_kind,
+        review_profile: review_profile.map(ToOwned::to_owned),
         created_at: created_at.to_string(),
         finished_at: Some(finished_at.to_string()),
         diff_fingerprint: stable_hash_hex(snapshot_payload),
@@ -4268,6 +4278,7 @@ fn run_inline_review_pipeline(
     codex_model: Option<String>,
     codex_effort: Option<String>,
     skip_analyzers: bool,
+    review_profile: Option<String>,
 ) -> Result<(), String> {
     let provider_label = match ai_provider {
         AiProvider::Claude => "Claude",
@@ -4286,7 +4297,7 @@ fn run_inline_review_pipeline(
     if turn_kind == AiReviewTurnKind::Initial && !skip_analyzers {
         if let Some(repo_path) = repo_path.as_deref() {
             append_inline_review_log(&store, &key, run_id, "Running local evidence analyzers.");
-            let results = match analyzer_specs(repo_path) {
+            let results = match analyzer_specs_with_profile(repo_path, review_profile.as_deref()) {
                 Ok(specs) if specs.is_empty() => {
                     append_inline_review_log(
                         &store,
@@ -4382,6 +4393,13 @@ fn run_inline_review_pipeline(
         run_id,
         format!("AI provider: {provider_label}"),
     );
+    if let Some(profile) = review_profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|profile| !profile.is_empty())
+    {
+        append_inline_review_log(&store, &key, run_id, format!("Review profile: {profile}"));
+    }
     match ai_provider {
         AiProvider::Claude => {
             if let Some(model) = claude_model.as_deref().and_then(normalize_claude_model) {
@@ -4667,6 +4685,7 @@ fn run_inline_review_pipeline(
         &destination_branch,
         &thread_id,
         turn_kind,
+        review_profile.as_deref(),
         &started_at,
         &generated_at,
         &effective_snapshot_payload,
@@ -4833,6 +4852,7 @@ pub async fn start_inline_review(
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    review_profile: Option<String>,
 ) -> Result<AiReviewRunState, String> {
     let ai_provider = ai_provider.unwrap_or_default();
     let skip_analyzers = skip_analyzers.unwrap_or(false);
@@ -4904,6 +4924,7 @@ pub async fn start_inline_review(
             codex_model,
             codex_effort,
             skip_analyzers,
+            review_profile,
         ) {
             set_inline_review_failed(&store_clone, &key, run_id, error);
         }
@@ -4998,6 +5019,7 @@ pub async fn reply_inline_review(
             codex_model,
             codex_effort,
             false,
+            None,
         ) {
             set_inline_review_failed(&store_clone, &key, run_id, error);
         }
@@ -5789,6 +5811,7 @@ Fix: render a useful empty state.
             "main",
             "thread-1",
             AiReviewTurnKind::Initial,
+            Some("agentic-balanced"),
             "1750076400000",
             "1750076460000",
             "diff payload snapshot",
@@ -5799,6 +5822,7 @@ Fix: render a useful empty state.
         .expect("review run should materialize");
 
         assert_eq!(run.findings.len(), 1);
+        assert_eq!(run.review_profile.as_deref(), Some("agentic-balanced"));
         let summary = run.summary_markdown.as_deref().unwrap_or_default();
         assert!(summary.contains("## Review"));
         assert!(summary.contains("## Resources"));
@@ -5830,6 +5854,7 @@ Fix: render a useful empty state.
             "main",
             "thread-1",
             AiReviewTurnKind::Initial,
+            None,
             "1750076400000",
             "1750076460000",
             "diff payload snapshot",
@@ -5864,6 +5889,7 @@ Fix: invalidate the query after the mutation succeeds."#;
             "main",
             "thread-1",
             AiReviewTurnKind::Initial,
+            None,
             "1750076400000",
             "1750076460000",
             "diff payload snapshot",
@@ -5902,6 +5928,7 @@ Fix: invalidate the query after the mutation succeeds."#;
             "main",
             "thread-1",
             AiReviewTurnKind::Initial,
+            None,
             "1750076400000",
             "1750076460000",
             "diff payload snapshot",

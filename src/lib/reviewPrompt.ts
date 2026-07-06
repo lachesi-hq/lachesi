@@ -84,24 +84,38 @@ export function effectiveReviewPrompt(repoKey: string): string {
 export interface ResolvedReviewPrompt {
   prompt: string;
   warnings: string[];
+  selectedProfile: string | null;
+  availableProfiles: string[];
 }
 
 /** Resolve the prompt used by review runs, including repo-owned prompt extensions. */
 export async function resolveReviewPrompt(
   repoKey: string,
   repoPath?: string | null,
+  reviewProfile?: string | null,
 ): Promise<ResolvedReviewPrompt> {
   const localOverride = getReviewPrompt(repoKey).trim();
   if (localOverride) {
-    return { prompt: localOverride, warnings: [] };
+    return {
+      prompt: localOverride,
+      warnings: [],
+      selectedProfile: reviewProfile?.trim() || null,
+      availableProfiles: [],
+    };
   }
 
   if (!repoPath?.trim()) {
-    return { prompt: DEFAULT_REVIEW_PROMPT, warnings: [] };
+    return {
+      prompt: DEFAULT_REVIEW_PROMPT,
+      warnings: [],
+      selectedProfile: null,
+      availableProfiles: [],
+    };
   }
 
   const result = await tauriCall<RepoReviewConfigLoadResult>("validate_repo_review_config", {
     repoPath,
+    reviewProfile: reviewProfile?.trim() || null,
   });
   if (result.errors.length > 0) {
     throw new Error(result.errors.map((error) => error.message).join("\n"));
@@ -115,5 +129,7 @@ export async function resolveReviewPrompt(
   return {
     prompt,
     warnings: result.warnings.map((warning) => warning.message),
+    selectedProfile: result.selectedProfile,
+    availableProfiles: Object.keys(result.config?.profiles ?? {}),
   };
 }

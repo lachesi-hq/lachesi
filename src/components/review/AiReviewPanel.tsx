@@ -54,6 +54,9 @@ export interface AiReviewPanelProps {
   aiProvider?: AiProvider;
   loading: boolean;
   error: string | null;
+  reviewProfiles?: string[];
+  selectedReviewProfile?: string;
+  onReviewProfileChange?: (profile: string) => void;
   onRun?: () => void;
   onAsk?: (userMessage: string) => Promise<void> | void;
   onReply?: (threadId: string, userMessage: string) => Promise<void> | void;
@@ -441,6 +444,9 @@ export function AiReviewPanel({
   aiProvider = "claude",
   loading,
   error,
+  reviewProfiles = [],
+  selectedReviewProfile = "",
+  onReviewProfileChange,
   onRun,
   onAsk,
   onReply,
@@ -613,6 +619,24 @@ export function AiReviewPanel({
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {findingCount > 0 && <Badge variant="secondary">{findingCount} findings</Badge>}
           <Badge variant="muted">{providerLabel}</Badge>
+          {activeRun?.reviewProfile && <Badge variant="muted">{activeRun.reviewProfile}</Badge>}
+          {reviewProfiles.length > 0 && (
+            <select
+              value={selectedReviewProfile}
+              onChange={(event) => onReviewProfileChange?.(event.target.value)}
+              className="h-7 max-w-40 rounded-md border border-border bg-secondary px-2 text-xs font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+              title="Review profile"
+              aria-label="Review profile"
+              disabled={loading}
+            >
+              <option value="">Base profile</option>
+              {reviewProfiles.map((profile) => (
+                <option key={profile} value={profile}>
+                  {profile}
+                </option>
+              ))}
+            </select>
+          )}
           {stagedFindingCount > 0 && <Badge variant="muted">{stagedFindingCount} staged</Badge>}
           {publishedFindingCount > 0 && (
             <Badge variant="success">{publishedFindingCount} published</Badge>
