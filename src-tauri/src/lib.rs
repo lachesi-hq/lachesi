@@ -8,9 +8,9 @@ mod review_storage;
 
 use commands::{bitbucket, context, repositories, review};
 use tauri::{
-    Emitter, Manager,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager,
 };
 
 const TRAY_ID: &str = "lachesi-main";
@@ -156,4 +156,83 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tauri_ipc_smoke {
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use serde_json::json;
+    use tauri::{
+        ipc::{CallbackFn, InvokeBody},
+        test::{mock_builder, mock_context, noop_assets, INVOKE_KEY},
+        webview::InvokeRequest,
+    };
+
+    use super::commands::bitbucket;
+
+    fn temp_repo_dir() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after UNIX epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("lachesi-tauri-ipc-smoke-{nonce}"));
+        fs::create_dir_all(&dir).expect("test repo directory should be created");
+        dir
+    }
+
+    fn ipc_request(command: &str, body: serde_json::Value) -> InvokeRequest {
+        InvokeRequest {
+            cmd: command.into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            url: "tauri://localhost"
+                .parse()
+                .expect("local Tauri URL should parse"),
+            body: InvokeBody::Json(body),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        }
+    }
+
+    #[test]
+    fn validate_repo_review_config_runs_through_tauri_ipc() {
+        let repo_dir = temp_repo_dir();
+        let app = mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                bitbucket::validate_repo_review_config
+            ])
+            .build(mock_context(noop_assets()))
+            .expect("mock Tauri app should build");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview should build");
+
+        let response = tauri::test::get_ipc_response(
+            &webview,
+            ipc_request(
+                "validate_repo_review_config",
+                json!({ "repoPath": repo_dir.to_string_lossy() }),
+            ),
+        )
+        .expect("validate_repo_review_config should return an IPC response")
+        .deserialize::<serde_json::Value>()
+        .expect("IPC response should be valid JSON");
+
+        assert_eq!(response["repoPath"], repo_dir.to_string_lossy().as_ref());
+        assert_eq!(
+            response["configPath"],
+            repo_dir.join(".lachesi.yaml").to_string_lossy().as_ref()
+        );
+        assert_eq!(response["exists"], false);
+        assert_eq!(response["config"], serde_json::Value::Null);
+        assert_eq!(response["warnings"].as_array().map(Vec::len), Some(0));
+        assert_eq!(response["errors"].as_array().map(Vec::len), Some(0));
+
+        fs::remove_dir_all(repo_dir).expect("test repo directory should be removed");
+    }
 }

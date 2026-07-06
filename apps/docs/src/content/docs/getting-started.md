@@ -39,3 +39,14 @@ Use the settings screen to configure repositories, credentials, local clone path
 pnpm build
 pnpm tauri:build
 ```
+
+## Test
+
+```sh
+pnpm test
+pnpm test:tauri
+```
+
+`pnpm test` runs the browser/jsdom Vitest suite. `pnpm test:tauri` runs the separate Tauri IPC smoke
+lane against a mock Tauri webview and low-risk Rust commands, without publishing comments or
+mutating remote providers.

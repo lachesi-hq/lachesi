@@ -17,6 +17,7 @@
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml tauri_ipc_smoke -- --nocapture",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006",
     "storybook:build": "storybook build --output-dir storybook-static",
