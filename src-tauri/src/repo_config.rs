@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_yaml::Value;
@@ -84,6 +84,8 @@ pub struct PathFilters {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PolicyConfig {
+    #[serde(default)]
+    pub packs: Vec<String>,
     #[serde(default)]
     pub sources: Vec<PolicySource>,
     #[serde(default)]
@@ -226,6 +228,14 @@ pub struct RepoConfigValidationMessage {
     pub message: String,
 }
 
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedPolicyPack {
+    pub id: String,
+    pub name: Option<String>,
+    pub path: String,
+}
+
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoReviewConfigLoadResult {
@@ -233,8 +243,24 @@ pub struct RepoReviewConfigLoadResult {
     pub config_path: String,
     pub exists: bool,
     pub config: Option<RepoReviewConfig>,
+    pub loaded_policy_packs: Vec<LoadedPolicyPack>,
     pub warnings: Vec<RepoConfigValidationMessage>,
     pub errors: Vec<RepoConfigValidationMessage>,
+}
+
+#[derive(Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct PolicyPackConfig {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    review: Option<ReviewConfig>,
+    #[serde(default)]
+    policy: Option<PolicyConfig>,
+    #[serde(default)]
+    analyzers: BTreeMap<String, AnalyzerConfig>,
 }
 
 fn deserialize_version<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -245,7 +271,9 @@ where
     match value {
         Value::String(value) => Ok(value),
         Value::Number(value) => Ok(value.to_string()),
-        _ => Err(serde::de::Error::custom("version must be a string or number")),
+        _ => Err(serde::de::Error::custom(
+            "version must be a string or number",
+        )),
     }
 }
 
@@ -264,6 +292,7 @@ pub fn load_from_repo_path(repo_path: &Path) -> Result<RepoReviewConfigLoadResul
             config_path: config_path.display().to_string(),
             exists: false,
             config: None,
+            loaded_policy_packs: Vec::new(),
             warnings: Vec::new(),
             errors: Vec::new(),
         });
@@ -274,7 +303,11 @@ pub fn load_from_repo_path(repo_path: &Path) -> Result<RepoReviewConfigLoadResul
     Ok(load_from_str(repo_path, &config_path, &contents))
 }
 
-fn load_from_str(repo_path: &Path, config_path: &Path, contents: &str) -> RepoReviewConfigLoadResult {
+fn load_from_str(
+    repo_path: &Path,
+    config_path: &Path,
+    contents: &str,
+) -> RepoReviewConfigLoadResult {
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
 
@@ -285,16 +318,32 @@ fn load_from_str(repo_path: &Path, config_path: &Path, contents: &str) -> RepoRe
                 config_path,
                 format!("Failed to parse YAML: {error}"),
             ));
-            return result(repo_path, config_path, true, None, warnings, errors);
+            return result(
+                repo_path,
+                config_path,
+                true,
+                None,
+                Vec::new(),
+                warnings,
+                errors,
+            );
         }
     };
 
     warnings.extend(unknown_field_warnings(config_path, &value));
     errors.extend(forbidden_field_errors(config_path, &value));
 
+    let mut loaded_policy_packs = Vec::new();
     let config = match serde_yaml::from_value::<RepoReviewConfig>(value) {
-        Ok(config) => {
+        Ok(mut config) => {
             validate_config(config_path, &config, &mut errors);
+            loaded_policy_packs = load_policy_packs(
+                repo_path,
+                config_path,
+                &mut config,
+                &mut warnings,
+                &mut errors,
+            );
             Some(config)
         }
         Err(error) => {
@@ -306,7 +355,15 @@ fn load_from_str(repo_path: &Path, config_path: &Path, contents: &str) -> RepoRe
         }
     };
 
-    result(repo_path, config_path, true, config, warnings, errors)
+    result(
+        repo_path,
+        config_path,
+        true,
+        config,
+        loaded_policy_packs,
+        warnings,
+        errors,
+    )
 }
 
 fn validate_config(
@@ -336,11 +393,193 @@ fn validate_config(
     }
 }
 
+fn load_policy_packs(
+    repo_path: &Path,
+    config_path: &Path,
+    config: &mut RepoReviewConfig,
+    warnings: &mut Vec<RepoConfigValidationMessage>,
+    errors: &mut Vec<RepoConfigValidationMessage>,
+) -> Vec<LoadedPolicyPack> {
+    let Some(policy) = config.policy.as_ref() else {
+        return Vec::new();
+    };
+
+    let mut pack_refs = policy.packs.clone();
+    pack_refs.extend(
+        policy
+            .sources
+            .iter()
+            .filter(|source| source.source_type == "pack")
+            .map(|source| source.path.clone()),
+    );
+
+    let mut loaded = Vec::new();
+    for pack_ref in pack_refs {
+        let resolved_path = resolve_pack_manifest_path(repo_path, &pack_ref);
+        let Some(pack_path) = resolved_path else {
+            warnings.push(message(
+                config_path,
+                format!("Policy pack `{pack_ref}` was not found."),
+            ));
+            continue;
+        };
+
+        let value = match fs::read_to_string(&pack_path)
+            .map_err(|error| {
+                format!(
+                    "Failed to read policy pack `{}`: {error}",
+                    pack_path.display()
+                )
+            })
+            .and_then(|contents| {
+                serde_yaml::from_str::<Value>(&contents).map_err(|error| {
+                    format!(
+                        "Failed to parse policy pack `{}`: {error}",
+                        pack_path.display()
+                    )
+                })
+            }) {
+            Ok(value) => value,
+            Err(error) => {
+                warnings.push(message(config_path, error));
+                continue;
+            }
+        };
+
+        let secret_errors = forbidden_field_errors(&pack_path, &value);
+        if !secret_errors.is_empty() {
+            errors.extend(secret_errors);
+            continue;
+        }
+
+        let pack = match serde_yaml::from_value::<PolicyPackConfig>(value) {
+            Ok(pack) => pack,
+            Err(error) => {
+                warnings.push(message(
+                    &pack_path,
+                    format!("Invalid policy pack shape: {error}"),
+                ));
+                continue;
+            }
+        };
+
+        let pack_id = pack
+            .id
+            .clone()
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or_else(|| default_policy_pack_id(&pack_path));
+        let pack_name = pack.name.clone();
+
+        merge_policy_pack(config, pack, warnings, &pack_path);
+        loaded.push(LoadedPolicyPack {
+            id: pack_id,
+            name: pack_name,
+            path: pack_path.display().to_string(),
+        });
+    }
+
+    loaded
+}
+
+fn default_policy_pack_id(pack_path: &Path) -> String {
+    let file_stem = pack_path.file_stem().and_then(|name| name.to_str());
+    if matches!(file_stem, Some("pack" | "lachesi-pack" | ".lachesi-pack")) {
+        return pack_path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or("policy-pack")
+            .to_string();
+    }
+
+    file_stem.unwrap_or("policy-pack").to_string()
+}
+
+fn resolve_pack_manifest_path(repo_path: &Path, pack_ref: &str) -> Option<PathBuf> {
+    let raw_path = Path::new(pack_ref);
+    let path = if raw_path.is_absolute() {
+        raw_path.to_path_buf()
+    } else {
+        repo_path.join(raw_path)
+    };
+
+    if path.is_file() {
+        return Some(path);
+    }
+    if !path.is_dir() {
+        return None;
+    }
+
+    ["pack.yaml", "lachesi-pack.yaml", ".lachesi-pack.yaml"]
+        .iter()
+        .map(|file| path.join(file))
+        .find(|candidate| candidate.is_file())
+}
+
+fn merge_policy_pack(
+    config: &mut RepoReviewConfig,
+    pack: PolicyPackConfig,
+    warnings: &mut Vec<RepoConfigValidationMessage>,
+    pack_path: &Path,
+) {
+    if let Some(pack_review) = pack.review {
+        merge_review_config(&mut config.review, pack_review);
+    }
+
+    if let Some(mut pack_policy) = pack.policy {
+        if !pack_policy.packs.is_empty() {
+            warnings.push(message(
+                pack_path,
+                "Nested policy packs are not loaded from inside a policy pack.",
+            ));
+            pack_policy.packs.clear();
+        }
+        let target = config.policy.get_or_insert_with(PolicyConfig::default);
+        target.sources.extend(pack_policy.sources);
+        target.rules.extend(pack_policy.rules);
+        target.path_rules.extend(pack_policy.path_rules);
+        target.ast_rules.extend(pack_policy.ast_rules);
+        target.suppressions.extend(pack_policy.suppressions);
+    }
+
+    for (id, analyzer) in pack.analyzers {
+        config.analyzers.entry(id).or_insert(analyzer);
+    }
+}
+
+fn merge_review_config(target: &mut Option<ReviewConfig>, pack_review: ReviewConfig) {
+    let target = target.get_or_insert_with(ReviewConfig::default);
+    if target.mode.is_none() {
+        target.mode = pack_review.mode;
+    }
+    merge_prompt_config(&mut target.prompt, pack_review.prompt);
+    if target.findings.is_none() {
+        target.findings = pack_review.findings;
+    }
+}
+
+fn merge_prompt_config(target: &mut Option<PromptConfig>, pack_prompt: Option<PromptConfig>) {
+    let Some(pack_prompt) = pack_prompt else {
+        return;
+    };
+    let Some(pack_extend) = pack_prompt.extend else {
+        return;
+    };
+    let target = target.get_or_insert_with(PromptConfig::default);
+    target.extend = match target.extend.take() {
+        Some(existing) if !existing.trim().is_empty() => {
+            Some(format!("{pack_extend}\n\n{existing}"))
+        }
+        _ => Some(pack_extend),
+    };
+}
+
 fn result(
     repo_path: &Path,
     config_path: &Path,
     exists: bool,
     config: Option<RepoReviewConfig>,
+    loaded_policy_packs: Vec<LoadedPolicyPack>,
     warnings: Vec<RepoConfigValidationMessage>,
     errors: Vec<RepoConfigValidationMessage>,
 ) -> RepoReviewConfigLoadResult {
@@ -349,6 +588,7 @@ fn result(
         config_path: config_path.display().to_string(),
         exists,
         config,
+        loaded_policy_packs,
         warnings,
         errors,
     }
@@ -427,12 +667,26 @@ fn collect_analyzer_fields(
 
 fn known_keys(context: Option<&str>, key: &str) -> Option<&'static [&'static str]> {
     match context {
-        None => Some(&["version", "review", "paths", "policy", "analyzers", "publish"]),
+        None => Some(&[
+            "version",
+            "review",
+            "paths",
+            "policy",
+            "analyzers",
+            "publish",
+        ]),
         Some("review") => Some(&["mode", "prompt", "findings"]),
         Some("prompt") => Some(&["extend"]),
         Some("findings") => Some(&["minSeverity", "requireAnchors"]),
         Some("paths") | Some("appliesTo") => Some(&["include", "exclude"]),
-        Some("policy") => Some(&["sources", "rules", "pathRules", "astRules", "suppressions"]),
+        Some("policy") => Some(&[
+            "packs",
+            "sources",
+            "rules",
+            "pathRules",
+            "astRules",
+            "suppressions",
+        ]),
         Some("policySource") => Some(&["type", "path"]),
         Some("rule") => Some(&[
             "id",
@@ -445,7 +699,14 @@ fn known_keys(context: Option<&str>, key: &str) -> Option<&'static [&'static str
             "remediation",
             "enforcement",
         ]),
-        Some("pathRule") => Some(&["id", "severity", "paths", "instruction", "rationale", "remediation"]),
+        Some("pathRule") => Some(&[
+            "id",
+            "severity",
+            "paths",
+            "instruction",
+            "rationale",
+            "remediation",
+        ]),
         Some("astRule") => Some(&[
             "id",
             "language",
@@ -515,7 +776,13 @@ fn collect_forbidden_fields(
                     .to_ascii_lowercase();
                 if matches!(
                     normalized.as_str(),
-                    "credential" | "credentials" | "token" | "apitoken" | "password" | "secret" | "username"
+                    "credential"
+                        | "credentials"
+                        | "token"
+                        | "apitoken"
+                        | "password"
+                        | "secret"
+                        | "username"
                 ) {
                     errors.push(message(
                         config_path,
@@ -583,7 +850,10 @@ publish:
         let result = load_from_repo_path(&repo).expect("load result");
         assert!(result.exists);
         assert!(result.errors.is_empty());
-        assert_eq!(result.config.as_ref().map(|config| config.version.as_str()), Some("0.1"));
+        assert_eq!(
+            result.config.as_ref().map(|config| config.version.as_str()),
+            Some("0.1")
+        );
         let _ = fs::remove_dir_all(repo);
     }
 
@@ -619,7 +889,9 @@ version: 2.0
         );
 
         assert_eq!(result.errors.len(), 1);
-        assert!(result.errors[0].message.contains("Unsupported .lachesi.yaml version"));
+        assert!(result.errors[0]
+            .message
+            .contains("Unsupported .lachesi.yaml version"));
     }
 
     #[test]
@@ -653,6 +925,175 @@ analyzers:
         );
 
         assert_eq!(result.errors.len(), 1);
-        assert!(result.errors[0].message.contains("Analyzer `tsc` is enabled but has no command"));
+        assert!(result.errors[0]
+            .message
+            .contains("Analyzer `tsc` is enabled but has no command"));
+    }
+
+    #[test]
+    fn loads_policy_pack_from_local_directory() {
+        let repo = temp_repo();
+        let pack_dir = repo.join("lachesi-policies/agentic-code");
+        fs::create_dir_all(&pack_dir).expect("create pack dir");
+        fs::write(
+            pack_dir.join("pack.yaml"),
+            r#"
+id: agentic-code
+name: Agentic Code
+review:
+  prompt:
+    extend: Pack prompt.
+policy:
+  rules:
+    - id: agentic.large-refactor
+      severity: high
+      instruction: Large generated refactors must include verification evidence.
+  pathRules:
+    - id: agentic.generated-tests
+      severity: medium
+      paths:
+        include:
+          - "src/**"
+      instruction: Generated code should preserve local test patterns.
+analyzers:
+  tsc:
+    enabled: true
+    command: "pnpm typecheck"
+"#,
+        )
+        .expect("write pack");
+
+        let result = load_from_str(
+            &repo,
+            &repo.join(".lachesi.yaml"),
+            r#"
+version: 0.1
+review:
+  prompt:
+    extend: Repo prompt.
+policy:
+  packs:
+    - ./lachesi-policies/agentic-code
+"#,
+        );
+
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.loaded_policy_packs.len(), 1);
+        assert_eq!(result.loaded_policy_packs[0].id, "agentic-code");
+        assert_eq!(
+            result.loaded_policy_packs[0].name.as_deref(),
+            Some("Agentic Code")
+        );
+
+        let config = result.config.expect("config");
+        let prompt = config
+            .review
+            .as_ref()
+            .and_then(|review| review.prompt.as_ref())
+            .and_then(|prompt| prompt.extend.as_deref())
+            .expect("prompt");
+        assert_eq!(prompt, "Pack prompt.\n\nRepo prompt.");
+
+        let policy = config.policy.expect("policy");
+        assert_eq!(policy.rules.len(), 1);
+        assert_eq!(policy.path_rules.len(), 1);
+        assert_eq!(
+            config
+                .analyzers
+                .get("tsc")
+                .and_then(|analyzer| analyzer.command.as_deref()),
+            Some("pnpm typecheck")
+        );
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn loads_policy_pack_from_policy_source() {
+        let repo = temp_repo();
+        let pack_dir = repo.join(".lachesi/packs/react-saas");
+        fs::create_dir_all(&pack_dir).expect("create pack dir");
+        fs::write(
+            pack_dir.join("pack.yaml"),
+            r#"
+id: react-saas
+policy:
+  rules:
+    - id: react.empty-state
+      severity: medium
+      instruction: Async UI should keep loading, empty, and error states explicit.
+"#,
+        )
+        .expect("write pack");
+
+        let result = load_from_str(
+            &repo,
+            &repo.join(".lachesi.yaml"),
+            r#"
+version: 0.1
+policy:
+  sources:
+    - type: pack
+      path: .lachesi/packs/react-saas
+"#,
+        );
+
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.loaded_policy_packs[0].id, "react-saas");
+        assert_eq!(result.config.unwrap().policy.unwrap().rules.len(), 1);
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn missing_policy_pack_warns_without_blocking() {
+        let repo = temp_repo();
+        let result = load_from_str(
+            &repo,
+            &repo.join(".lachesi.yaml"),
+            r#"
+version: 0.1
+policy:
+  packs:
+    - ./missing-pack
+"#,
+        );
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].message.contains("was not found"));
+        assert!(result.loaded_policy_packs.is_empty());
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn policy_pack_secret_fields_are_blocking_errors() {
+        let repo = temp_repo();
+        let pack_dir = repo.join("packs/unsafe");
+        fs::create_dir_all(&pack_dir).expect("create pack dir");
+        fs::write(
+            pack_dir.join("pack.yaml"),
+            r#"
+id: unsafe
+token: should-not-be-here
+"#,
+        )
+        .expect("write pack");
+
+        let result = load_from_str(
+            &repo,
+            &repo.join(".lachesi.yaml"),
+            r#"
+version: 0.1
+policy:
+  packs:
+    - packs/unsafe
+"#,
+        );
+
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].message.contains("looks like a credential"));
+        assert!(result.loaded_policy_packs.is_empty());
+        let _ = fs::remove_dir_all(repo);
     }
 }

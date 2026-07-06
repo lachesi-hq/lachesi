@@ -347,7 +347,7 @@ Violation result:
 
 The first implementation slice should:
 
-1. load policy sources from effective repo config
+1. load policy packs and policy sources from effective repo config
 2. extract ADR metadata and explicit rule blocks into `PolicyRule` objects
 3. match path rules against changed files before building the review prompt
 4. add policy artifacts to `ReviewRun.evidence`

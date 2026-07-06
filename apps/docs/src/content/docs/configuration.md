@@ -34,6 +34,8 @@ paths:
   exclude:
     - "dist/**"
 policy:
+  packs:
+    - ./lachesi-policies/agentic-code
   rules:
     - id: no-cross-module-imports
       severity: medium
@@ -43,4 +45,4 @@ publish:
   requireManualSubmit: true
 ```
 
-Repo config should not contain credentials, tokens, private URLs, or other secrets.
+Policy packs can contribute prompt extensions, rules, path rules, and analyzer defaults from local directories. Repo config and policy packs should not contain credentials, tokens, private URLs, or other secrets.

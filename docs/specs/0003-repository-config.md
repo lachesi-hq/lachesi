@@ -127,6 +127,8 @@ paths:
     - "target/**"
 
 policy:
+  packs:
+    - ./lachesi-policies/agentic-code
   sources:
     - type: adr
       path: docs/adr
@@ -215,9 +217,39 @@ Optional list of local policy inputs. v0.1 source types:
 - `adr`: directory containing Architecture Decision Records
 - `markdown`: single markdown policy file
 - `yaml`: structured local rule file, reserved for the policy-engine spec
+- `pack`: local policy pack directory or manifest file
 
 Missing policy paths should produce a warning, not block review, unless a future
 field marks the source as required.
+
+### `policy.packs`
+
+Optional shorthand list of local policy pack directories or manifest files.
+
+```yaml
+policy:
+  packs:
+    - ./lachesi-policies/react-saas
+    - ./.lachesi/packs/agentic-code
+```
+
+Each entry is resolved relative to the repository root unless it is absolute. If
+the entry is a directory, Lachesi looks for `pack.yaml`, `lachesi-pack.yaml`, or
+`.lachesi-pack.yaml`.
+
+Pack manifests may provide:
+
+- `review.prompt.extend`
+- `policy.rules`
+- `policy.pathRules`
+- `policy.astRules`
+- `policy.suppressions`
+- `analyzers`
+
+Pack analyzer entries are defaults: a repo-level analyzer with the same id wins.
+Pack prompt extensions are prepended before the repo-owned prompt extension.
+Missing packs produce warnings. Credential-like fields inside pack manifests are
+blocking validation errors.
 
 ### `analyzers`
 
