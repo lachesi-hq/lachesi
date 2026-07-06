@@ -53,6 +53,7 @@ import { formatRelative } from "@/lib/format";
 import { extractIssueKeys } from "@/lib/jira";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
 import { tauriCall } from "@/lib/tauri";
+import { loadViewedFiles, saveViewedFiles, viewedFilesStorageKey } from "@/lib/viewedFilesStorage";
 import type {
   AiLineQuestionContext,
   AiReviewContext,
@@ -130,22 +131,6 @@ interface ConversationThreadItem {
   draft: DraftComment | null;
 }
 
-function viewedFilesStorageKey(workspace: string | null, repo: string | null, prId: number | null) {
-  if (!workspace || !repo || prId == null) return null;
-  return `lachesi.viewedFiles.${workspace}/${repo}#${prId}`;
-}
-
-function loadViewedFiles(key: string | null): Set<string> {
-  if (!key) return new Set();
-  try {
-    const value = JSON.parse(localStorage.getItem(key) ?? "[]");
-    if (!Array.isArray(value)) return new Set();
-    return new Set(value.filter((item) => typeof item === "string"));
-  } catch {
-    return new Set();
-  }
-}
-
 function diffPrefixForChange(change: ChangeData): string {
   if (change.type === "insert") return "+";
   if (change.type === "delete") return "-";
@@ -205,15 +190,6 @@ function anchorForDiffLine(
   }
   if (to == null && from == null) return null;
   return { change, path, to, from, side };
-}
-
-function saveViewedFiles(key: string | null, viewed: Set<string>) {
-  if (!key) return;
-  try {
-    localStorage.setItem(key, JSON.stringify([...viewed]));
-  } catch {
-    // Viewed state is a convenience; ignore storage failures.
-  }
 }
 
 function cycleViewMode(mode: DiffViewMode): DiffViewMode {

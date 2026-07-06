@@ -1,23 +1,18 @@
 import { useEffect, useMemo } from "react";
 import type { PrGroup } from "@/hooks/usePullRequests";
+import {
+  buildMenuBarPrSnapshot,
+  readMenuBarPrSnapshot,
+  writeMenuBarPrSnapshot,
+} from "@/lib/menuBarPrSnapshotStorage";
 import { isTauri } from "@/lib/tauri";
 import type { PullRequestSummary } from "@/types";
 
-const SNAPSHOT_STORAGE_KEY = "lachesi.menuBar.prSnapshot.v1";
 const TRAY_ID = "lachesi-main";
 const MAX_MENU_PRS = 8;
 const MAX_NOTIFICATIONS_PER_SYNC = 3;
 const MENU_TITLE_LIMIT = 46;
 const MENU_BRANCH_LIMIT = 38;
-
-interface PrSnapshotEntry {
-  title: string;
-  updatedOn: string;
-  commentCount: number;
-  state: string;
-}
-
-type PrSnapshot = Record<string, PrSnapshotEntry>;
 
 interface UseMenuBarPrSyncArgs {
   groups: PrGroup[];
@@ -85,36 +80,6 @@ function parsePrMenuPayload(payload: string) {
     repo: decodeURIComponent(repo),
     id: prId,
   };
-}
-
-function buildSnapshot(prs: PullRequestSummary[]): PrSnapshot {
-  const snapshot: PrSnapshot = {};
-  for (const pr of prs) {
-    snapshot[prKey(pr)] = {
-      title: pr.title,
-      updatedOn: pr.updatedOn,
-      commentCount: pr.commentCount,
-      state: pr.state,
-    };
-  }
-  return snapshot;
-}
-
-function readSnapshot(): PrSnapshot | null {
-  try {
-    const raw = window.localStorage.getItem(SNAPSHOT_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as PrSnapshot) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeSnapshot(snapshot: PrSnapshot) {
-  try {
-    window.localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
-  } catch {
-    // Best effort only: notification dedupe should never break review flows.
-  }
 }
 
 async function focusMainWindow() {
@@ -290,10 +255,10 @@ async function updateTrayMenu(args: UseMenuBarPrSyncArgs, latestPrs: PullRequest
 async function notifyPrChanges(prs: PullRequestSummary[]) {
   if (!isTauri() || prs.length === 0) return;
 
-  const previous = readSnapshot();
-  const next = buildSnapshot(prs);
+  const previous = readMenuBarPrSnapshot();
+  const next = buildMenuBarPrSnapshot(prs);
   if (!previous) {
-    writeSnapshot(next);
+    writeMenuBarPrSnapshot(next);
     return;
   }
 
@@ -322,7 +287,7 @@ async function notifyPrChanges(prs: PullRequestSummary[]) {
     }
   }
 
-  writeSnapshot(next);
+  writeMenuBarPrSnapshot(next);
   if (changes.length === 0) return;
 
   const { isPermissionGranted, requestPermission, sendNotification } = await import(
