@@ -9,13 +9,20 @@ rules: true
 
 ## Context
 
-Lachesi's native layer has grown around a few large command modules. Today:
+Lachesi's native layer grew around a few large command modules. The command
+facade status is now:
 
-- `src-tauri/src/commands/review.rs` is ~5,981 lines with 24 commands
-- `src-tauri/src/commands/bitbucket.rs` is ~2,123 lines with 24 commands
+- `src-tauri/src/commands/review.rs` is a thin facade over `src-tauri/src/services/review.rs`
+- `src-tauri/src/commands/bitbucket.rs` is a thin facade over `src-tauri/src/services/bitbucket.rs`
 - `src-tauri/src/commands/repositories.rs` is ~1,026 lines with 9 commands
 
-These files mix concerns that are easier to reason about — and test — when kept apart: command registration and input validation, provider HTTP clients (`reqwest` currently lives inline in `bitbucket.rs` and `context.rs`), DTO/request mapping, review persistence, long-running AI review/fix orchestration, and local repository operations. There is no dedicated client/provider or service layer under `src-tauri/src/` yet; `review_storage.rs` is the one example of an already-extracted focused module (persistence).
+The extracted service files still contain follow-up cohesion work, but command
+registration is no longer coupled to the large implementation bodies. Concerns
+that are easier to reason about — and test — when kept apart include command
+registration and input validation, provider HTTP clients (`reqwest` currently
+lives inside service/context modules), DTO/request mapping, review persistence,
+long-running AI review/fix orchestration, and local repository operations.
+`review_storage.rs` remains the existing extracted persistence module.
 
 Readest — a mature cross-platform Tauri app used as a reference for this work — demonstrates the target discipline: one module per domain feature, with the `#[tauri::command]` acting as a thin adapter that validates input, offloads heavy work (`spawn_blocking`), and delegates to a private `*_sync`/service function or a provider struct. Its plugin commands are literally one-line delegates (`commands.rs`) to a service (`desktop.rs`/`mobile.rs`), and pure decision logic is split from side-effecting shells so it can be unit-tested without a webview. Most of its modules stay well under ~500 lines.
 
@@ -96,6 +103,8 @@ Code review should still reject broader violations that are not yet machine-chec
 - `src-tauri/src/commands/review.rs`
 - `src-tauri/src/commands/bitbucket.rs`
 - `src-tauri/src/commands/repositories.rs`
+- `src-tauri/src/services/review.rs`
+- `src-tauri/src/services/bitbucket.rs`
 - `src-tauri/src/review_storage.rs` (existing example of an extracted focused module)
 - [Use a Tauri desktop shell with a React webview and a Rust Bitbucket client](./ARCH-001-tauri-react-rust-bitbucket-boundary.md)
 - [Keep Tauri command and mock IPC surfaces in sync](./ARCH-003-keep-tauri-command-and-mock-ipc-surfaces-in-sync.md)

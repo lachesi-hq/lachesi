@@ -5,6 +5,7 @@ mod launch;
 mod local_repo;
 mod repo_config;
 mod review_storage;
+mod services;
 
 use commands::{bitbucket, context, repositories, review};
 use tauri::{
