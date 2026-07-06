@@ -221,6 +221,7 @@ Runs the desktop app against the Tauri backend.
 
 ```sh
 pnpm test
+pnpm test:tauri
 pnpm lint
 pnpm build
 pnpm storybook
@@ -232,6 +233,10 @@ pnpm docs:deploy
 ```
 
 `pnpm build` runs TypeScript and Vite production build. `pnpm lint` runs Biome.
+`pnpm test` runs the regular jsdom/Vitest suite. `pnpm test:tauri` runs the separate Tauri IPC
+smoke lane, which boots a mock Tauri webview and calls selected low-risk Rust commands through the
+real IPC dispatcher without publishing comments or mutating remote providers. CI should run it as a
+separate job from the browser/jsdom test lane because it depends on the Rust/Tauri toolchain.
 `pnpm storybook:build` creates the static Storybook output in `storybook-static/`.
 `pnpm storybook:deploy` deploys the built Storybook through the dedicated Cloudflare Workers Static
 Assets config.
