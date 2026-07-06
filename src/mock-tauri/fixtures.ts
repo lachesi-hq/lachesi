@@ -41,9 +41,9 @@ export const mockConfig: AppConfig = {
 const RAW_PULL_REQUESTS: Omit<PullRequestSummary, "workspace" | "repo" | "draft">[] = [
   {
     id: 1732,
-    title: "[Draft] feat(compliance): add IATF 16949 certification column",
+    title: "[Draft] feat(settings): add notification preference column",
     authorDisplayName: "Sam Author",
-    sourceBranch: "feat/iatf-16949",
+    sourceBranch: "feat/notification-preferences",
     destinationBranch: "develop",
     state: "OPEN",
     commentCount: 3,
@@ -56,9 +56,9 @@ const RAW_PULL_REQUESTS: Omit<PullRequestSummary, "workspace" | "repo" | "draft"
   },
   {
     id: 1731,
-    title: "CB-2066 - fix category drill-down returning empty orders",
+    title: "APP-2066 - fix saved-view filter returning empty results",
     authorDisplayName: "Alex Reviewer",
-    sourceBranch: "CB-2066-category-drilldown",
+    sourceBranch: "APP-2066-saved-view-filter",
     destinationBranch: "develop",
     state: "OPEN",
     commentCount: 0,
@@ -68,9 +68,9 @@ const RAW_PULL_REQUESTS: Omit<PullRequestSummary, "workspace" | "repo" | "draft"
   },
   {
     id: 1729,
-    title: "CB-000 - refactor supplier-management stories to MSW string patterns",
+    title: "APP-000 - refactor profile-card stories to MSW string patterns",
     authorDisplayName: "Alex Reviewer",
-    sourceBranch: "CB-000-msw-stories",
+    sourceBranch: "APP-000-msw-stories",
     destinationBranch: "develop",
     state: "OPEN",
     commentCount: 5,
@@ -79,9 +79,9 @@ const RAW_PULL_REQUESTS: Omit<PullRequestSummary, "workspace" | "repo" | "draft"
   },
   {
     id: 1728,
-    title: "CB-000 - fix i18n loader and auth token in Storybook runtime",
+    title: "APP-000 - fix i18n loader and auth token in Storybook runtime",
     authorDisplayName: "Alex Reviewer",
-    sourceBranch: "CB-000-storybook-i18n",
+    sourceBranch: "APP-000-storybook-i18n",
     destinationBranch: "develop",
     state: "OPEN",
     commentCount: 1,
@@ -90,9 +90,9 @@ const RAW_PULL_REQUESTS: Omit<PullRequestSummary, "workspace" | "repo" | "draft"
   },
   {
     id: 1702,
-    title: "CB-1791 - Connect orders and order details postgresql component",
+    title: "APP-1791 - connect activity feed and detail panel component",
     authorDisplayName: "Alex Reviewer",
-    sourceBranch: "CB-1791-orders-pg",
+    sourceBranch: "APP-1791-activity-feed-details",
     destinationBranch: "develop",
     state: "OPEN",
     commentCount: 12,
@@ -110,9 +110,9 @@ export const mockPullRequests: PullRequestSummary[] = RAW_PULL_REQUESTS.map((pr)
 
 export const mockPullRequestDetail: PullRequestDetail = {
   id: 1731,
-  title: "CB-2066 - fix category drill-down returning empty orders",
+  title: "APP-2066 - fix saved-view filter returning empty results",
   descriptionRaw:
-    "Category drill-down was passing the Postgres token instead of the ERP category code.\n\nThis PR adds `categoryErpId` to the budget row and uses it for the categories lookup.",
+    "Saved-view navigation was passing a display label instead of the stable filter id.\n\nThis PR adds `filterId` to the saved-view row and uses it for the records lookup.",
   state: "OPEN",
   draft: false,
   authorDisplayName: "Alex Reviewer",
@@ -120,7 +120,7 @@ export const mockPullRequestDetail: PullRequestDetail = {
     { displayName: "Alex Reviewer", accountId: "alex", approved: false },
     { displayName: "Jamie Reviewer", accountId: "jamie", approved: true },
   ],
-  sourceBranch: "CB-2066-category-drilldown",
+  sourceBranch: "APP-2066-saved-view-filter",
   destinationBranch: "develop",
   sourceCommitHash: "mock-source-commit",
   destinationCommitHash: "mock-destination-commit",
@@ -133,22 +133,22 @@ export const mockDiffstat: DiffstatEntry[] = [
     status: "modified",
     linesAdded: 21,
     linesRemoved: 4,
-    oldPath: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.spec.ts",
-    newPath: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.spec.ts",
+    oldPath: "src/app/views/utils/buildRecordsUrlFromSavedView.spec.ts",
+    newPath: "src/app/views/utils/buildRecordsUrlFromSavedView.spec.ts",
   },
   {
     status: "modified",
     linesAdded: 19,
     linesRemoved: 4,
-    oldPath: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
-    newPath: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+    oldPath: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
+    newPath: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
   },
   {
     status: "added",
     linesAdded: 12,
     linesRemoved: 0,
     oldPath: null,
-    newPath: "src/app/dashboard/budget/types/BudgetAnalyticsItem.ts",
+    newPath: "src/app/views/types/SavedViewRecord.ts",
   },
   {
     status: "modified",
@@ -164,11 +164,11 @@ export const mockClosedPrMetrics: ClosedPrMetric[] = [
     workspace: "example-workspace",
     repo: "frontend-app",
     prId: 1701,
-    title: "Add order timeline filters",
+    title: "Add activity timeline filters",
     authorDisplayName: "Sam Author",
     authorAccountId: "sam",
     state: "MERGED",
-    sourceBranch: "feature/order-timeline-filters",
+    sourceBranch: "feature/activity-timeline-filters",
     destinationBranch: "develop",
     createdOn: "2026-06-03T09:15:00.000Z",
     updatedOn: "2026-06-05T14:30:00.000Z",
@@ -280,19 +280,19 @@ export const mockClosedPrMetrics: ClosedPrMetric[] = [
 ];
 
 /** A small, real-shaped unified diff used for diff-viewer stories/tests. */
-export const mockRawDiff = `diff --git a/src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts b/src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts
+export const mockRawDiff = `diff --git a/src/app/views/utils/buildRecordsUrlFromSavedView.ts b/src/app/views/utils/buildRecordsUrlFromSavedView.ts
 index 5fdfc9cb3..154929261 100644
---- a/src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts
-+++ b/src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts
-@@ -13,9 +13,12 @@ export function buildOrdersUrlFromBudgetRow(
+--- a/src/app/views/utils/buildRecordsUrlFromSavedView.ts
++++ b/src/app/views/utils/buildRecordsUrlFromSavedView.ts
+@@ -13,9 +13,12 @@ export function buildRecordsUrlFromSavedView(
    const params = new URLSearchParams();
-   params.set("tab", "lines");
+   params.set("tab", "records");
 
--  params.set("orderCategories", row.key);
-+  // Use the ERP category code, not the Postgres token (CB-2066).
-+  params.set("orderCategories", row.categoryErpId);
-+  params.set("categories", row.categoryErpId);
-   return \`/\${lang}/dashboard/orders?\${params.toString()}\`;
+-  params.set("view", row.label);
++  // Use the stable filter id, not the display label.
++  params.set("view", row.filterId);
++  params.set("filter", row.filterId);
+   return \`/\${lang}/dashboard/records?\${params.toString()}\`;
  }
 `;
 
@@ -300,12 +300,12 @@ export const mockComments: PrComment[] = [
   {
     id: 9001,
     parentId: null,
-    contentRaw: "Should we guard against `categoryErpId` being undefined here?",
+    contentRaw: "Should we guard against `filterId` being undefined here?",
     userDisplayName: "Sam Author",
     createdOn: "2026-06-16T16:10:00.000Z",
     deleted: false,
     inline: {
-      path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+      path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
       to: 17,
       from: null,
     },
@@ -313,12 +313,12 @@ export const mockComments: PrComment[] = [
   {
     id: 9002,
     parentId: 9001,
-    contentRaw: "Good catch — the row type now makes it required, so it can't be undefined.",
+    contentRaw: "Good catch - the row type now makes it required, so it can't be undefined.",
     userDisplayName: "Alex Reviewer",
     createdOn: "2026-06-16T16:25:00.000Z",
     deleted: false,
     inline: {
-      path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+      path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
       to: 17,
       from: null,
     },

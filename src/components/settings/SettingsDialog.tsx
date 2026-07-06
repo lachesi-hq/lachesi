@@ -573,7 +573,7 @@ function SettingsForm({
           placeholder="https://example.atlassian.net"
         />
         <p className="text-xs text-muted-foreground">
-          Used to link PR issue keys (CB-1234) and add Jira context to AI reviews. Leave empty to
+          Used to link PR issue keys (APP-1234) and add Jira context to AI reviews. Leave empty to
           disable.
         </p>
       </div>

@@ -31,6 +31,11 @@ import {
 
 type Handler = (args?: Record<string, unknown>) => unknown;
 
+interface SavedReview {
+  content: string;
+  generatedAt: string;
+}
+
 let mockCommentId = 100000;
 let mockPullRequestDetailState = mockPullRequestDetail;
 const mockFixStates = new Map<string, AiReviewFixState>();
@@ -50,8 +55,8 @@ let mockReviewJobs: AiReviewJob[] = [
     workspace: "example-workspace",
     repo: "backend-api",
     prId: 1020,
-    prTitle: "CB-1777 - feat(invoice-lines): add v2 mock query endpoints",
-    sourceBranch: "feature/invoice-lines-v2-bff-mock",
+    prTitle: "APP-1777 - feat(user-notes): add mock query endpoints",
+    sourceBranch: "feature/user-notes-mock-endpoints",
     destinationBranch: "develop",
     status: "succeeded",
     trigger: "menuBar",
@@ -66,8 +71,8 @@ let mockReviewJobs: AiReviewJob[] = [
     workspace: "example-workspace",
     repo: "frontend-app",
     prId: 1731,
-    prTitle: "CB-2066 - fix category drill-down returning empty orders",
-    sourceBranch: "bugfix/CB-2066-budget-drilldown-category-filter",
+    prTitle: "APP-2066 - fix saved-view filter returning empty results",
+    sourceBranch: "bugfix/APP-2066-saved-view-filter",
     destinationBranch: "develop",
     status: "running",
     trigger: "menuBar",
@@ -81,8 +86,8 @@ let mockReviewJobs: AiReviewJob[] = [
 
 const mockRepositoryFiles: RepositoryFileEntry[] = [
   { path: "src/App.tsx", status: "modified" },
-  { path: "src/components/orders/OrderTable.tsx", status: "unchanged" },
-  { path: "src/components/orders/OrderDetails.tsx", status: "unchanged" },
+  { path: "src/components/records/RecordTable.tsx", status: "unchanged" },
+  { path: "src/components/records/RecordDetails.tsx", status: "unchanged" },
   { path: "src/lib/api.ts", status: "unchanged" },
   { path: "src/lib/format.ts", status: "added" },
   { path: "src/lib/localDraft.ts", status: "untracked" },
@@ -92,29 +97,29 @@ const mockRepositoryFiles: RepositoryFileEntry[] = [
 ];
 
 const mockRepositoryFileContents: Record<string, string> = {
-  "src/App.tsx": `import { OrderTable } from "./components/orders/OrderTable";
+  "src/App.tsx": `import { RecordTable } from "./components/records/RecordTable";
 
 export function App() {
-  return <OrderTable />;
+  return <RecordTable />;
 }
 `,
-  "src/components/orders/OrderTable.tsx": `export function OrderTable() {
+  "src/components/records/RecordTable.tsx": `export function RecordTable() {
   return (
     <table>
       <tbody>
         <tr>
-          <td>ORD-1001</td>
+          <td>REC-1001</td>
         </tr>
       </tbody>
     </table>
   );
 }
 `,
-  "src/components/orders/OrderDetails.tsx": `export function OrderDetails() {
-  return <section>Order details</section>;
+  "src/components/records/RecordDetails.tsx": `export function RecordDetails() {
+  return <section>Record details</section>;
 }
 `,
-  "src/lib/api.ts": `export async function getOrders() {
+  "src/lib/api.ts": `export async function getRecords() {
   return [];
 }
 `,
@@ -153,11 +158,11 @@ index 1111111..2222222 100644
 --- a/src/App.tsx
 +++ b/src/App.tsx
 @@ -1,5 +1,5 @@
- import { OrderTable } from "./components/orders/OrderTable";
+ import { RecordTable } from "./components/records/RecordTable";
  
  export function App() {
--  return <OrderTable />;
-+  return <OrderTable showLocalDraft />;
+-  return <RecordTable />;
++  return <RecordTable showLocalDraft />;
  }
 `,
   "src/lib/format.ts": `diff --git a/src/lib/format.ts b/src/lib/format.ts
@@ -307,6 +312,53 @@ function createMessage(role: "user" | "assistant", content: string): AiReviewMes
     role,
     content,
     createdAt: String(Date.now()),
+  };
+}
+
+function createSavedReviewStore(
+  args: Record<string, unknown> | undefined,
+  content: string,
+): SavedReview {
+  const key = reviewKey(args);
+  const now = String(Date.now());
+  const threadId = nowId("thread");
+  const review: SavedReview = {
+    content,
+    generatedAt: now,
+  };
+  setReviewStore(key, {
+    activeThreadId: threadId,
+    threads: [
+      {
+        id: threadId,
+        title: "AI review",
+        createdAt: now,
+        updatedAt: now,
+        claudeSessionId: `mock-session-${threadId}`,
+        messages: [createMessage("assistant", content)],
+      },
+    ],
+    reviewRuns: getReviewStore(key)?.reviewRuns ?? [],
+  });
+  return review;
+}
+
+function loadSavedReviewFromStore(args: Record<string, unknown> | undefined): SavedReview | null {
+  const store = getReviewStore(reviewKey(args));
+  const thread = store?.threads[store.threads.length - 1];
+  if (!thread) return null;
+  let message: AiReviewMessage | null = null;
+  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+    const candidate = thread.messages[index];
+    if (candidate?.role === "assistant") {
+      message = candidate;
+      break;
+    }
+  }
+  if (!message) return null;
+  return {
+    content: message.content,
+    generatedAt: message.createdAt,
   };
 }
 
@@ -531,10 +583,10 @@ function enqueueMockFixSuccess(key: string): void {
       summary: "Claude fixed the actionable review findings and updated the affected files.",
       suggestedCommitMessage: "Fix AI review findings for PR #1731",
       filesTouched: [
-        "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
-        "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.spec.ts",
+        "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
+        "src/app/views/utils/buildRecordsUrlFromSavedView.spec.ts",
       ],
-      tests: ["pnpm test -- buildOrdersUrlFromBudgetRow"],
+      tests: ["pnpm test -- buildRecordsUrlFromSavedView"],
       claudeDurationMs: 530,
       claudeSessionId: "mock-session-1",
       logs: [
@@ -739,6 +791,27 @@ export const mockHandlers: Record<string, Handler> = {
     error: null,
   }),
   list_ai_review_jobs: () => mockReviewJobs,
+  create_ai_review_job: (args) => {
+    const now = new Date().toISOString();
+    const job: AiReviewJob = {
+      id: nowId("job"),
+      workspace: String(args?.workspace ?? "example-workspace"),
+      repo: String(args?.repo ?? "frontend-app"),
+      prId: Number(args?.prId ?? args?.id ?? 0),
+      prTitle: String(args?.prTitle ?? `PR #${String(args?.prId ?? args?.id ?? "")}`),
+      sourceBranch: String(args?.sourceBranch ?? "feature/review-panel"),
+      destinationBranch: String(args?.destinationBranch ?? "develop"),
+      status: "queued",
+      trigger: String(args?.trigger ?? "manual"),
+      threadId: null,
+      error: null,
+      createdAt: now,
+      startedAt: null,
+      finishedAt: null,
+    };
+    mockReviewJobs = [job, ...mockReviewJobs];
+    return job;
+  },
   update_ai_review_job_status: (args) => {
     const jobId = String(args?.jobId ?? "");
     const next = mockReviewJobs.find((job) => job.id === jobId);
@@ -763,6 +836,7 @@ export const mockHandlers: Record<string, Handler> = {
   get_current_user: () => ({ displayName: "Alex Reviewer", accountId: "alex" }),
   save_config: () => null,
   save_credentials: () => null,
+  save_github_token: () => null,
   clear_credentials: () => null,
   list_review_terminals: () => [
     { id: "wezterm", label: "WezTerm", available: true },
@@ -864,6 +938,19 @@ export const mockHandlers: Record<string, Handler> = {
   },
   delete_comment: () => null,
   launch_claude_review: () => null,
+  run_inline_review: (args) => {
+    const payload = String(args?.payload ?? "").trim();
+    const content =
+      payload.length > 0
+        ? defaultInitialReviewContent()
+        : "## AI Review\n\nNo review payload was provided.";
+    return createSavedReviewStore(args, content);
+  },
+  load_saved_review: (args) => loadSavedReviewFromStore(args),
+  delete_saved_review: (args) => {
+    deleteReviewStore(reviewKey(args));
+    return null;
+  },
   load_ai_review_store: (args) => getReviewStore(reviewKey(args)) ?? null,
   create_ai_review_thread: (args) => {
     const key = reviewKey(args);
@@ -1056,10 +1143,10 @@ export const mockHandlers: Record<string, Handler> = {
   draft_ai_review_comments: () =>
     [
       {
-        path: "src/app/dashboard/budget/utils/buildOrdersUrlFromBudgetRow.ts",
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
         to: 17,
         from: null,
-        raw: "Please add a regression test covering the `categoryErpId` path used for the generated orders URL.",
+        raw: "Please add a regression test covering the `filterId` path used for the generated records URL.",
       },
     ] satisfies AiReviewDraftCommentSuggestion[],
   get_ai_review_fix_state: (args) => mockFixStates.get(fixKey(args)) ?? null,
@@ -1177,12 +1264,12 @@ export const mockHandlers: Record<string, Handler> = {
         finishedAt: String(Date.now()),
         summary:
           "Claude resolved the merge conflicts and staged the result. Review the merge commit and commit when ready.",
-        suggestedCommitMessage: "Merge develop into feature/invoice-lines-v2-bff-mock",
+        suggestedCommitMessage: "Merge develop into feature/user-notes-mock-endpoints",
         filesTouched: [
-          "src/app/modules/invoice-lines/invoice-lines-v2.service.ts",
-          "src/app/modules/invoice-lines/dtos/query-invoice-lines-v2-body.dto.ts",
+          "src/app/modules/user-notes/user-notes.service.ts",
+          "src/app/modules/user-notes/dtos/query-user-notes-body.dto.ts",
         ],
-        tests: ["pnpm test -- invoice-lines-v2"],
+        tests: ["pnpm test -- user-notes"],
         claudeDurationMs: 820,
         claudeSessionId: "mock-conflict-session-1",
         logs: [
@@ -1200,17 +1287,15 @@ export const mockHandlers: Record<string, Handler> = {
   save_jira_token: () => null,
   save_notion_token: () => null,
   get_jira_issue: (args) => ({
-    key: (args?.key as string) ?? "CB-0000",
-    summary: "Add order ID and article ID as query filters for order lines",
+    key: (args?.key as string) ?? "APP-0000",
+    summary: "Add status and owner filters for records",
     status: "In Progress",
     descriptionText:
-      "As a user I want to filter order lines by order id and article id.\nAcceptance: filters combine (AND); empty values are ignored.",
-    notionUrls: [
-      "https://www.notion.so/example/Order-lines-filters-abc123def4567890abc123def45678",
-    ],
+      "As a user I want to filter records by status and owner.\nAcceptance: filters combine (AND); empty values are ignored.",
+    notionUrls: ["https://www.notion.so/example/Record-filters-abc123def4567890abc123def45678"],
   }),
   get_notion_page: () => ({
-    title: "Order lines filters — spec",
-    text: "## Goal\nLet users narrow order lines by order id and article id.\n- Filters combine (AND)\n- An empty filter is ignored",
+    title: "Record filters - spec",
+    text: "## Goal\nLet users narrow records by status and owner.\n- Filters combine (AND)\n- An empty filter is ignored",
   }),
 };

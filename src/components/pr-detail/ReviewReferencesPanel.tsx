@@ -322,7 +322,7 @@ export function ReviewReferencesPanel({
                 <Input
                   value={form.key}
                   onChange={(event) => setForm((prev) => ({ ...prev, key: event.target.value }))}
-                  placeholder="Jira key, e.g. CB-1234"
+                  placeholder="Jira key, e.g. APP-1234"
                 />
               ) : form.type === "repository" ? (
                 availableRepositories.length > 0 ? (
