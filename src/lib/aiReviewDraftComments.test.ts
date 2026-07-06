@@ -41,6 +41,7 @@ const reviewRun: ReviewRun = {
   destinationBranch: "develop",
   status: "succeeded",
   turnKind: "initial",
+  reviewProfile: null,
   createdAt: "1750076400000",
   finishedAt: "1750076500000",
   diffFingerprint: "abc123",

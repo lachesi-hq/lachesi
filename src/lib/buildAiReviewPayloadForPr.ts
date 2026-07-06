@@ -18,6 +18,7 @@ export interface AiReviewPayloadForPr {
   branchStatus: BranchStatus | null;
   jiraKeys: string[];
   rawDiff: string;
+  reviewProfile: string | null;
 }
 
 async function fetchReviewContext(jiraKeys: string[], enabled: boolean): Promise<string | null> {
@@ -52,6 +53,7 @@ export async function buildAiReviewPayloadForPr({
   repoConfig,
   jiraBaseUrl,
   jiraContextEnabled,
+  reviewProfile,
 }: {
   workspace: string;
   repo: string;
@@ -60,6 +62,7 @@ export async function buildAiReviewPayloadForPr({
   repoConfig?: RepoRef | null;
   jiraBaseUrl: string | null;
   jiraContextEnabled: boolean;
+  reviewProfile?: string | null;
 }): Promise<AiReviewPayloadForPr> {
   const pr = await tauriCall<PullRequestDetail>("get_pull_request", {
     provider,
@@ -82,6 +85,7 @@ export async function buildAiReviewPayloadForPr({
   const { prompt, warnings } = await resolveReviewPrompt(
     `${workspace}/${repo}`,
     repoConfig?.localPath,
+    reviewProfile,
   );
   if (warnings.length > 0) {
     console.warn("Lachesi repo config warnings:", warnings);
@@ -96,5 +100,5 @@ export async function buildAiReviewPayloadForPr({
     jiraContext,
     reviewReferences: loadReviewReferences(workspace, repo, prId),
   });
-  return { payload, pr, branchStatus, jiraKeys, rawDiff };
+  return { payload, pr, branchStatus, jiraKeys, rawDiff, reviewProfile: reviewProfile ?? null };
 }

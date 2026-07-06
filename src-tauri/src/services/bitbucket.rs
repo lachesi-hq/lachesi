@@ -1354,8 +1354,21 @@ pub fn load_config() -> Result<AppConfig, String> {
 #[tauri::command]
 pub fn validate_repo_review_config(
     repo_path: String,
+    review_profile: Option<String>,
 ) -> Result<RepoReviewConfigLoadResult, String> {
-    repo_config::load_from_repo_path(Path::new(&repo_path))
+    if review_profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|profile| !profile.is_empty())
+        .is_some()
+    {
+        repo_config::load_from_repo_path_with_profile(
+            Path::new(&repo_path),
+            review_profile.as_deref(),
+        )
+    } else {
+        repo_config::load_from_repo_path(Path::new(&repo_path))
+    }
 }
 
 #[tauri::command]

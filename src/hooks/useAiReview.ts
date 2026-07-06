@@ -25,6 +25,7 @@ interface StartReviewArgs {
   claudeEffort: ClaudeReviewEffort | null;
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
+  reviewProfile?: string | null;
 }
 
 interface ReplyReviewArgs {
@@ -177,6 +178,7 @@ export function useAiReview(
       claudeEffort,
       codexModel,
       codexEffort,
+      reviewProfile,
     }: StartReviewArgs) => {
       if (!workspace || !repo || prId == null) return;
       const key = `${workspace}/${repo}/${prId}`;
@@ -201,6 +203,7 @@ export function useAiReview(
           claudeEffort,
           codexModel,
           codexEffort,
+          reviewProfile: reviewProfile?.trim() || null,
         });
         if (keyRef.current === key) {
           setState(result);

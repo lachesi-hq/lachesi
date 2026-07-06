@@ -109,6 +109,7 @@ Secrets are never resolved from repo config. Credential resolution remains:
 version: 0.1
 
 review:
+  profile: frontend-strict
   mode: balanced
   prompt:
     extend: |
@@ -154,6 +155,19 @@ publish:
   defaultMode: inline
   requireManualSubmit: true
   allowGeneralComments: true
+
+profiles:
+  frontend-strict:
+    mode: strict
+    minSeverity: medium
+    prompt:
+      extend: |
+        Pay extra attention to async UI states, generated API contracts, and persisted filters.
+    policyPacks:
+      - ./lachesi-policies/react-saas
+    analyzers:
+      tsc: required
+      tests: optional
 ```
 
 ## Field Reference
@@ -173,6 +187,49 @@ Allowed values:
 - `strict`
 
 Built-in default: `balanced`.
+
+### `review.profile`
+
+Optional named review profile to apply by default for this repository.
+
+The profile id must exist under top-level `profiles`. If omitted and a profile
+named `default` exists, Lachesi applies `default`. A per-run UI or CLI override
+can select a different profile for that review.
+
+Missing profile ids produce a warning and Lachesi falls back to the base review
+config.
+
+### `profiles`
+
+Optional map of named review profiles. Profiles are operating modes layered on
+top of the base repo config and loaded policy packs.
+
+```yaml
+profiles:
+  agentic-balanced:
+    mode: balanced
+    minSeverity: medium
+    prompt:
+      extend: |
+        Treat large agent-authored refactors as high risk unless tests or local evidence prove behavior preservation.
+    policyPacks:
+      - ./.lachesi/packs/agentic-code
+    analyzers:
+      tsc: required
+      tests: optional
+```
+
+Profile fields:
+
+- `mode`: overrides `review.mode` for that run.
+- `minSeverity`: sets `review.findings.minSeverity`.
+- `prompt.extend`: prepended before repo-owned `review.prompt.extend`.
+- `policyPacks`: additional local packs to load for the selected profile.
+- `analyzers`: analyzer requirements. Supported values are `required`,
+  `optional`, and `disabled`.
+
+`required` enables an analyzer already defined by the repo or loaded packs. If no
+analyzer config exists for that id, Lachesi warns and continues.
 
 ### `review.prompt.extend`
 
