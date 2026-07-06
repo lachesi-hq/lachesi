@@ -575,6 +575,7 @@ export interface RepoReviewConfig {
   } | null;
   paths?: RepoPathFilters | null;
   policy?: {
+    packs: string[];
     sources: Array<{ type: string; path: string }>;
     rules: Array<{
       id: string;
@@ -634,11 +635,18 @@ export interface RepoConfigValidationMessage {
   message: string;
 }
 
+export interface LoadedPolicyPack {
+  id: string;
+  name: string | null;
+  path: string;
+}
+
 export interface RepoReviewConfigLoadResult {
   repoPath: string;
   configPath: string;
   exists: boolean;
   config: RepoReviewConfig | null;
+  loadedPolicyPacks: LoadedPolicyPack[];
   warnings: RepoConfigValidationMessage[];
   errors: RepoConfigValidationMessage[];
 }
