@@ -131,6 +131,7 @@ pub fn run() {
             repositories::checkout_repository_branch,
             repositories::fetch_repository,
             repositories::pull_repository,
+            repositories::stash_repository,
             review::get_ai_review_run_state,
             review::load_ai_review_store,
             review::create_ai_review_thread,

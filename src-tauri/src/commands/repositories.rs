@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -668,6 +669,22 @@ fn pull_repo(repo_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn stash_repo(repo_path: &Path) -> Result<(), String> {
+    if !dirty(repo_path)? {
+        return Ok(());
+    }
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    let message = format!("lachesi repository view stash {timestamp}");
+    run_git_checked(
+        repo_path,
+        &["stash", "push", "--include-untracked", "-m", &message],
+    )?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_repository_worktrees() -> Result<Vec<RepositoryWorktreeState>, String> {
     let cfg = config::load();
@@ -897,15 +914,50 @@ pub fn pull_repository(workspace: String, repo: String) -> Result<RepositoryWork
     Ok(state_for_repo(provider, workspace, repo, Some(repo_path)))
 }
 
+#[tauri::command]
+pub fn stash_repository(
+    workspace: String,
+    repo: String,
+) -> Result<RepositoryWorktreeState, String> {
+    let repo_path = configured_repo(&workspace, &repo)?;
+    stash_repo(&repo_path)?;
+    let provider = config::load()
+        .repos
+        .iter()
+        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo)
+        .map(|candidate| candidate.provider)
+        .unwrap_or_default();
+    Ok(state_for_repo(provider, workspace, repo, Some(repo_path)))
+}
+
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
         editor_file_arg, local_branch_for_remote, parse_commit_messages,
-        parse_git_blame_line_porcelain, parse_git_status_porcelain_z, validate_repo_relative_path,
-        RepositoryFileStatus, GIT_SHOW_MESSAGE_MARKER,
+        parse_git_blame_line_porcelain, parse_git_status_porcelain_z, run_git_checked, stash_repo,
+        validate_repo_relative_path, RepositoryFileStatus, GIT_SHOW_MESSAGE_MARKER,
     };
+
+    fn temp_git_repo(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("lachesi-{name}-{nonce}"));
+        fs::create_dir_all(&path).expect("create temp git repo");
+        run_git_checked(&path, &["init"]).expect("git init");
+        run_git_checked(&path, &["config", "user.email", "lachesi@example.test"])
+            .expect("git config email");
+        run_git_checked(&path, &["config", "user.name", "Lachesi Test"]).expect("git config name");
+        fs::write(path.join("README.md"), "# Test\n").expect("write initial file");
+        run_git_checked(&path, &["add", "README.md"]).expect("git add");
+        run_git_checked(&path, &["commit", "-m", "Initial commit"]).expect("git commit");
+        path
+    }
 
     #[test]
     fn maps_origin_remote_to_local_branch_name() {
@@ -952,6 +1004,20 @@ mod tests {
             Some(&RepositoryFileStatus::Renamed)
         );
         assert!(!statuses.contains_key("src/OldName.tsx"));
+    }
+
+    #[test]
+    fn stash_repo_stashes_untracked_changes() {
+        let repo = temp_git_repo("stash");
+        fs::write(repo.join("draft.txt"), "local draft\n").expect("write untracked file");
+
+        stash_repo(&repo).expect("stash repo");
+        let status = run_git_checked(&repo, &["status", "--porcelain"]).expect("git status");
+        let stashes = run_git_checked(&repo, &["stash", "list"]).expect("git stash list");
+
+        assert!(status.is_empty());
+        assert!(stashes.contains("lachesi repository view stash"));
+        let _ = fs::remove_dir_all(repo);
     }
 
     #[test]

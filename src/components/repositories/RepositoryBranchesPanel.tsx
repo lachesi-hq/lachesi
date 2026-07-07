@@ -7,6 +7,7 @@ import {
   fetchRepository,
   listRepositoryWorktrees,
   pullRepository,
+  stashRepository,
 } from "@/lib/localRepoService";
 import type { RepositoryWorktreeState, RepositoryWorktreeStatus } from "@/types";
 
@@ -35,7 +36,7 @@ function currentRef(repo: RepositoryWorktreeState): string {
   return repo.currentBranch ?? (repo.detachedHead ? `detached ${repo.detachedHead}` : "-");
 }
 
-type RepositoryAction = "checkout" | "fetch" | "pull";
+type RepositoryAction = "checkout" | "fetch" | "pull" | "stash";
 
 type RepositoryActionFeedback = {
   message: string;
@@ -47,6 +48,7 @@ type RepositoryActionState = {
   feedbackByRepo: Record<string, RepositoryActionFeedback>;
   fetchKey: string | null;
   pullKey: string | null;
+  stashKey: string | null;
 };
 
 const initialRepositoryActionState: RepositoryActionState = {
@@ -54,6 +56,7 @@ const initialRepositoryActionState: RepositoryActionState = {
   feedbackByRepo: {},
   fetchKey: null,
   pullKey: null,
+  stashKey: null,
 };
 
 type RepositoryBranchesState = RepositoryActionState & {
@@ -165,6 +168,7 @@ function repositoryBranchesReducer(
         },
         fetchKey: action.action === "fetch" ? busyKey : state.fetchKey,
         pullKey: action.action === "pull" ? busyKey : state.pullKey,
+        stashKey: action.action === "stash" ? busyKey : state.stashKey,
       };
     }
     default:
@@ -180,6 +184,8 @@ function actionRunningMessage(action: RepositoryAction): string {
       return "Fetching from remote...";
     case "pull":
       return "Pulling latest changes...";
+    case "stash":
+      return "Stashing local changes...";
     default:
       return "Working...";
   }
@@ -193,6 +199,8 @@ function actionSuccessMessage(action: RepositoryAction): string {
       return "Fetch completed.";
     case "pull":
       return "Pull completed.";
+    case "stash":
+      return "Local changes stashed.";
     default:
       return "Completed.";
   }
@@ -209,6 +217,7 @@ export function RepositoryBranchesPanel() {
     pullKey,
     repos,
     selectedBranches,
+    stashKey,
   } = state;
 
   const updateRepoActionState = (
@@ -263,15 +272,20 @@ export function RepositoryBranchesPanel() {
 
   const runRepoAction = async (
     repo: RepositoryWorktreeState,
-    command: "fetch_repository" | "pull_repository",
+    command: "fetch_repository" | "pull_repository" | "stash_repository",
   ) => {
     const key = `${repo.workspace}/${repo.repo}`;
-    const action = command === "fetch_repository" ? "fetch" : "pull";
+    const action =
+      command === "fetch_repository" ? "fetch" : command === "pull_repository" ? "pull" : "stash";
     updateRepoActionState(key, action, "running");
     try {
       const input = { workspace: repo.workspace, repo: repo.repo };
       const updated =
-        action === "fetch" ? await fetchRepository(input) : await pullRepository(input);
+        action === "fetch"
+          ? await fetchRepository(input)
+          : action === "pull"
+            ? await pullRepository(input)
+            : await stashRepository(input);
       replaceRepo(updated);
       updateRepoActionState(key, action, "success");
     } catch (err) {
@@ -303,40 +317,45 @@ export function RepositoryBranchesPanel() {
       )}
 
       <div className="min-h-0 flex-1 overflow-auto p-4">
-        <div className="overflow-hidden rounded-md border border-border">
-          <table className="w-full border-collapse text-left text-sm">
+        <div className="overflow-auto rounded-md border border-border">
+          <table className="min-w-[1280px] border-collapse text-left text-sm">
             <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 font-medium">Repository</th>
-                <th className="px-3 py-2 font-medium">Path</th>
-                <th className="px-3 py-2 font-medium">Current</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Checkout</th>
-                <th className="px-3 py-2 text-right font-medium">Actions</th>
+                <th className="w-[180px] px-3 py-2 font-medium">Workspace</th>
+                <th className="w-[210px] px-3 py-2 font-medium">Repository</th>
+                <th className="w-[360px] px-3 py-2 font-medium">Path</th>
+                <th className="w-[190px] px-3 py-2 font-medium">Current</th>
+                <th className="w-[160px] px-3 py-2 font-medium">Status</th>
+                <th className="w-[260px] px-3 py-2 font-medium">Checkout</th>
+                <th className="sticky right-0 z-10 w-[310px] border-l border-border bg-muted px-3 py-2 text-right font-medium">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {repos.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-8 text-center text-muted-foreground" colSpan={6}>
+                  <td className="px-3 py-8 text-center text-muted-foreground" colSpan={7}>
                     {loading ? "Loading repositories..." : "No repositories configured."}
                   </td>
                 </tr>
               ) : (
                 repos.map((repo) => {
                   const key = `${repo.workspace}/${repo.repo}`;
-                  const actionBusy = checkoutKey === key || fetchKey === key || pullKey === key;
+                  const actionBusy =
+                    checkoutKey === key || fetchKey === key || pullKey === key || stashKey === key;
                   const canCheckout =
                     repo.status === "clean" && repo.branches.length > 0 && !actionBusy;
                   const canFetch =
                     (repo.status === "clean" || repo.status === "dirty") && !actionBusy;
                   const canPull = repo.status === "clean" && !actionBusy;
+                  const canStash = repo.status === "dirty" && !actionBusy;
                   const feedback = feedbackByRepo[key];
                   return (
                     <tr key={key} className="border-t border-border">
-                      <td className="max-w-[220px] px-3 py-3">
+                      <td className="px-3 py-3 align-top">
                         <div className="flex flex-col gap-1">
-                          <div className="truncate font-medium">{key}</div>
+                          <div className="truncate font-medium">{repo.workspace}</div>
                           {feedback && (
                             <span
                               className={
@@ -352,13 +371,16 @@ export function RepositoryBranchesPanel() {
                           )}
                         </div>
                       </td>
-                      <td className="max-w-[360px] px-3 py-3">
+                      <td className="px-3 py-3 align-top">
+                        <div className="truncate font-medium">{repo.repo}</div>
+                      </td>
+                      <td className="px-3 py-3 align-top">
                         <div className="truncate font-mono text-xs text-muted-foreground">
                           {repo.localPath ?? "-"}
                         </div>
                       </td>
-                      <td className="px-3 py-3 font-mono text-xs">{currentRef(repo)}</td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 align-top font-mono text-xs">{currentRef(repo)}</td>
+                      <td className="px-3 py-3 align-top">
                         <div className="flex flex-col gap-1">
                           <Badge variant={statusVariant(repo.status)}>
                             {statusLabel(repo.status)}
@@ -370,7 +392,7 @@ export function RepositoryBranchesPanel() {
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 align-top">
                         <select
                           className="h-8 w-full min-w-[190px] rounded-md border border-input bg-background px-2 text-sm text-foreground disabled:opacity-50"
                           value={selectedBranches[key] ?? ""}
@@ -394,8 +416,8 @@ export function RepositoryBranchesPanel() {
                           )}
                         </select>
                       </td>
-                      <td className="px-3 py-3 text-right">
-                        <div className="flex justify-end gap-2">
+                      <td className="sticky right-0 border-l border-border bg-background px-3 py-3 text-right align-top">
+                        <div className="flex justify-end gap-1.5">
                           <Button
                             size="sm"
                             variant="ghost"
@@ -403,6 +425,19 @@ export function RepositoryBranchesPanel() {
                             onClick={() => void runRepoAction(repo, "fetch_repository")}
                           >
                             {fetchKey === key ? "Fetching..." : "Fetch"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={!canStash}
+                            onClick={() => void runRepoAction(repo, "stash_repository")}
+                            title={
+                              repo.dirty
+                                ? "Stash local changes, including untracked files"
+                                : "No local changes to stash"
+                            }
+                          >
+                            {stashKey === key ? "Stashing..." : "Stash"}
                           </Button>
                           <Button
                             size="sm"
