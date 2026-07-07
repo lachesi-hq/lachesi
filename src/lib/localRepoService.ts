@@ -95,3 +95,10 @@ export function pullRepository(input: RepositoryWorktreeInput): Promise<Reposito
     repo: input.repo,
   });
 }
+
+export function stashRepository(input: RepositoryWorktreeInput): Promise<RepositoryWorktreeState> {
+  return tauriCall<RepositoryWorktreeState>("stash_repository", {
+    workspace: input.workspace,
+    repo: input.repo,
+  });
+}
