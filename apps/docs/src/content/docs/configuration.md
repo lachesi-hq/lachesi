@@ -55,3 +55,11 @@ publish:
 ```
 
 Policy packs can contribute prompt extensions, rules, path rules, profiles, and analyzer defaults from local directories. Profiles can be selected from the desktop AI review panel per run. Repo config and policy packs should not contain credentials, tokens, private URLs, or other secrets.
+
+Validate repo config locally before running a review:
+
+```sh
+lachesi config validate --repo-path . --format json
+```
+
+The command exits with code `2` when the config is invalid.
