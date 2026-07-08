@@ -1,0 +1,46 @@
+# Lachesi task runner (Windows).
+# macOS/Linux contributors use the parallel `Makefile`; recipe names are kept in
+# parity across both files per ADR ARCH-007. Recipes delegate to the canonical
+# package.json / cargo / tauri commands so package.json stays authoritative.
+
+# List available recipes (runs by default).
+help:
+    @just --list
+
+# Start the Vite dev server (browser mock IPC).
+dev:
+    pnpm run dev
+
+# Start the full Tauri app (real IPC).
+# Requires BITBUCKET_USERNAME and BITBUCKET_TOKEN in the environment.
+tauri-dev:
+    pnpm tauri dev
+
+# Typecheck + Vite production build.
+build:
+    pnpm run build
+
+# TypeScript typecheck only.
+typecheck:
+    pnpm run typecheck
+
+# Biome lint.
+lint:
+    pnpm run lint
+
+# Vitest run.
+test:
+    pnpm run test
+
+# Rust IPC smoke / parity test lane (ARCH-005).
+test-tauri:
+    pnpm run test:tauri
+
+# Archgate ADR compliance check.
+check:
+    archgate check
+
+# Build the Windows distributable: the NSIS setup .exe (ARCH-008).
+# Output: src-tauri/target/release/bundle/nsis/Lachesi_<version>_x64-setup.exe
+bundle-windows:
+    pnpm tauri build --bundles nsis
