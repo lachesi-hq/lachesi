@@ -11,6 +11,7 @@
     "web:dev": "pnpm --filter @lachesi/web dev",
     "web:build": "pnpm --filter @lachesi/web build",
     "web:preview": "pnpm --filter @lachesi/web preview",
+    "web:deploy": "npx wrangler deploy --config wrangler.web.jsonc",
     "tauri": "tauri",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
