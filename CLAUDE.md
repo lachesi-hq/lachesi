@@ -17,6 +17,19 @@ archgate check        # run ADR compliance checks
 
 Credentials for Tauri dev: `BITBUCKET_USERNAME` and `BITBUCKET_TOKEN` env vars must be set before launching.
 
+### Task runners (ARCH-007)
+
+Repository commands are also wrapped by platform-native task runners at the repo root. Use `make <recipe>` on macOS/Linux and `just <recipe>` on Windows — both expose the **same recipe names** (`dev`, `tauri-dev`, `build`, `typecheck`, `lint`, `test`, `test-tauri`, `check`, `bundle-windows`). **Any recipe added, renamed, or removed must be mirrored in BOTH `Makefile` and `justfile`** — recipe-name parity is enforced by the ARCH-007 automated check (`archgate check` fails on a mismatch), including helper recipes like `help`.
+
+### Windows build/distribution (ARCH-008)
+
+The Windows distributable is the Tauri **NSIS setup `.exe`**, built locally on Windows with `just bundle-windows` (`pnpm tauri build --bundles nsis`). Output lands at `src-tauri/target/release/bundle/nsis/Lachesi_<version>_x64-setup.exe`. Builds are currently **unsigned** (SmartScreen warning) and MSI/CI/code-signing are out of scope until a follow-up ADR.
+
+**Windows build prerequisites** (needed for `just bundle-windows` / `pnpm tauri dev`, not for `just dev`):
+- **Rust toolchain** — `winget install Rustlang.Rustup` (installs `stable-x86_64-pc-windows-msvc`; adds `~/.cargo/bin` to PATH — open a new terminal after installing).
+- **MSVC C++ Build Tools** — `winget install Microsoft.VisualStudio.2022.BuildTools` with the **"Desktop development with C++"** workload. Provides the MSVC `link.exe` linker + Windows SDK that the `*-msvc` Rust toolchain requires. Without it, `cargo build` fails at the link step.
+- **WebView2 runtime** — preinstalled on current Windows 10/11; otherwise `winget install Microsoft.EdgeWebView2Runtime`.
+
 ## Key Architecture Notes
 
 ### IPC boundary

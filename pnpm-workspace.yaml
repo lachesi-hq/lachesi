@@ -1,3 +1,9 @@
 packages:
   - "."
   - "apps/*"
+# pnpm v11 build-script approval gate (replaces package.json's removed
+# "pnpm.onlyBuiltDependencies"). Each dependency whose install/build scripts
+# may run must be explicitly set to true here.
+allowBuilds:
+  esbuild: true
+  sharp: true

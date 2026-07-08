@@ -74,10 +74,5 @@
     "typescript": "^5.9.3",
     "vite": "^7.0.4",
     "vitest": "^3.0.5"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
   }
 }
