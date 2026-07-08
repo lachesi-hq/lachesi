@@ -5,7 +5,9 @@
 
 # Run recipes through the native Windows PowerShell instead of just's default
 # `sh` (which is not present on a standard Windows machine). See ADR ARCH-007.
-set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+# -ExecutionPolicy Bypass applies to this spawned process only (no machine-wide
+# change) so PowerShell script shims like pnpm.ps1 run under a Restricted policy.
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
 
 # List available recipes (runs by default).
 help:

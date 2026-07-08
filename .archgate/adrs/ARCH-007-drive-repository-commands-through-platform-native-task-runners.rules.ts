@@ -111,7 +111,7 @@ export default {
             message:
               "justfile does not configure a shell. On Windows, just defaults to `sh`, which is not installed, so every recipe fails with \"could not find the shell `sh`\".",
             file: JUSTFILE,
-            fix: 'Add at the top of the justfile: set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]',
+            fix: 'Add at the top of the justfile: set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]',
           });
         }
       },
