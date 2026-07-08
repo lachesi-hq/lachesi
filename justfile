@@ -3,6 +3,10 @@
 # parity across both files per ADR ARCH-007. Recipes delegate to the canonical
 # package.json / cargo / tauri commands so package.json stays authoritative.
 
+# Run recipes through the native Windows PowerShell instead of just's default
+# `sh` (which is not present on a standard Windows machine). See ADR ARCH-007.
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+
 # List available recipes (runs by default).
 help:
     @just --list

@@ -43,6 +43,7 @@ Repository commands MUST be driven through a platform-native task runner, and th
 - Both files live at the repository root.
 - Both files MUST define the **same set of recipe/target names** — the recipe name is the stable, cross-platform contract; the body may differ per platform.
 - Recipes MUST delegate to the canonical commands (`pnpm run <script>`, `cargo ...`, `pnpm tauri ...`) rather than re-implementing their logic, so `package.json` remains the source of truth for the underlying tooling.
+- The `justfile` MUST configure a **native Windows shell** with `set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]` at the top of the file. It MUST NOT rely on `just`'s default `sh` shell, which is absent on a standard Windows machine and causes every recipe to fail with `could not find the shell 'sh'`. Windows recipes therefore run as native PowerShell, not POSIX-`sh`-wrapped commands.
 
 Scope: this ADR governs the **developer-facing command entrypoints** for the main repository. It does not replace `package.json` scripts (which remain the canonical definition of Node tooling), and it does not govern CI pipeline definitions.
 
@@ -65,6 +66,8 @@ The shared recipe surface MUST cover at least the everyday lanes:
 - **DO** keep both runners at the repository root so `make <recipe>` and `just <recipe>` are discoverable.
 - **DO** have each recipe delegate to the canonical command (`pnpm run <script>`, `cargo ...`, `pnpm tauri ...`) so `package.json` stays authoritative.
 - **DO** express platform-specific steps (credential env exports, native bundling) inside the platform's own runner using that platform's native shell.
+- **DO** configure `set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]` at the top of the `justfile` so recipes run in native PowerShell rather than the missing `sh`.
+- **DO** keep recipe bodies shell-agnostic where possible (calling `pnpm`/`cargo`/`pnpm tauri`) so both PowerShell (Windows `just`) and `sh` (Unix `make`) execute them correctly.
 - **DO** update both files in the same change whenever a recipe is added, renamed, or removed.
 - **DO** name recipes with lowercase kebab-case identifiers that start at column 0 (e.g. `tauri-dev:`) so they list cleanly and parse consistently across both runners.
 
@@ -76,6 +79,8 @@ The shared recipe surface MUST cover at least the everyday lanes:
 - **DON'T** introduce a `scripts/*.sh` or `scripts/*.ps1` entrypoint as an alternative command surface; consolidate on the two task runners.
 - **DON'T** use divergent recipe names for the same lane across platforms (e.g. `tauri-dev` in one file and `dev-tauri` in the other).
 - **DON'T** hardcode secrets in either runner — read credentials from the environment or keychain per [ARCH-001](./ARCH-001-tauri-react-rust-bitbucket-boundary.md).
+- **DON'T** rely on `just`'s default `sh` shell in the `justfile` — `sh` is not installed on a standard Windows machine and recipes will fail with `could not find the shell 'sh'`.
+- **DON'T** write POSIX-`sh`-specific syntax (e.g. `$$VAR` expansion, `&&` chains assuming `sh`, backtick command substitution) in `justfile` recipe bodies; use PowerShell-native or shell-agnostic commands.
 
 ## Consequences
 
@@ -136,6 +141,9 @@ check:
 `justfile` (Windows):
 
 ```just
+# Native Windows shell — recipes run in PowerShell, not the missing `sh`.
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+
 dev:
     pnpm run dev
 
@@ -169,6 +177,7 @@ Automated enforcement (companion `ARCH-007-...rules.ts`):
 
 - **`task-runner-parity`** verifies that the root `Makefile` and root `justfile` expose the identical set of recipe/target names. Any name present in one but not the other fails the check.
 - **`task-runner-files-present`** warns (non-blocking) when neither runner exists yet, and reports a hard violation when exactly one exists without its counterpart.
+- **`justfile-uses-native-windows-shell`** verifies that the root `justfile` declares a `set windows-shell` (or `set shell`) directive, so Windows recipes never fall back to the missing default `sh` shell.
 
 Manual enforcement (code review):
 

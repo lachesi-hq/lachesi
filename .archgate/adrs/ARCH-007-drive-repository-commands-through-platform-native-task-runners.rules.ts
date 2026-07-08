@@ -97,6 +97,26 @@ export default {
       },
     },
 
+    "justfile-uses-native-windows-shell": {
+      description:
+        "The justfile must configure a native Windows shell so recipes never fall back to just's missing default `sh`",
+      async check(ctx) {
+        // Only applies once the Windows runner exists.
+        if (!(await fileExists(ctx, JUSTFILE))) return;
+
+        // Match `set windows-shell := [...]` or `set shell := [...]`.
+        const matches = await ctx.grep(JUSTFILE, /^\s*set\s+(windows-shell|shell)\s*:=/m);
+        if (matches.length === 0) {
+          ctx.report.violation({
+            message:
+              "justfile does not configure a shell. On Windows, just defaults to `sh`, which is not installed, so every recipe fails with \"could not find the shell `sh`\".",
+            file: JUSTFILE,
+            fix: 'Add at the top of the justfile: set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]',
+          });
+        }
+      },
+    },
+
     "task-runner-parity": {
       description:
         "The Makefile and justfile must expose the identical set of recipe/target names",
