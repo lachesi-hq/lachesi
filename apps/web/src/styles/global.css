@@ -1,7 +1,8 @@
 :root {
   color-scheme: dark;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    Geist, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0d0d0d;
 }
 
 * {
@@ -13,18 +14,251 @@ body {
   min-width: 320px;
   min-height: 100%;
   margin: 0;
-  background: #000000;
-  color: #ffffff;
+  background: #0d0d0d;
+  color: #edecec;
 }
 
-.coming-soon {
+a {
+  color: inherit;
+}
+
+.landing {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  font-size: clamp(44px, 8vw, 104px);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 43%, rgba(255, 255, 255, 0.04), transparent 32%),
+    linear-gradient(180deg, #0e0e0e 0%, #090909 100%);
+}
+
+.hero {
+  width: min(100%, 1440px);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: clamp(72px, 10vh, 120px) clamp(20px, 6vw, 80px) 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(44px, 7vh, 64px);
+}
+
+.hero-copy {
+  width: min(100%, 820px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.hero h1 {
+  margin: 0;
+  max-width: 800px;
+  color: #edecec;
+  font-size: clamp(56px, 7.2vw, 96px);
   font-weight: 800;
   letter-spacing: 0;
   line-height: 1;
-  text-align: center;
+}
+
+.hero p {
+  margin: 31px 0 0;
+  max-width: 780px;
+  color: rgba(237, 236, 236, 0.62);
+  font-size: clamp(18px, 2vw, 24px);
+  line-height: 1.42;
+}
+
+.hero-cta {
+  margin-top: 28px;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px;
+  border-radius: 10px;
+  background: #edecec;
+  color: #0e0e0e;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.25);
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease;
+}
+
+.hero-cta:hover {
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.hero-cta:focus-visible {
+  outline: 3px solid rgba(237, 236, 236, 0.35);
+  outline-offset: 4px;
+}
+
+.product-preview {
+  width: min(100%, 1120px);
+  height: clamp(420px, 52vw, 680px);
+  display: flex;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
+  background: #14120b;
+  box-shadow: 0 40px 80px rgba(0, 0, 0, 0.67);
+}
+
+.preview-sidebar {
+  width: 260px;
+  flex: 0 0 260px;
+  padding: 24px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0e0e0e;
+}
+
+.preview-label {
+  margin: 0 0 20px;
+  color: rgba(237, 236, 236, 0.62);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.preview-pr {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  color: rgba(237, 236, 236, 0.62);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.preview-pr + .preview-pr {
+  margin-top: 8px;
+}
+
+.preview-pr-active {
+  background: #14120b;
+  color: #edecec;
+}
+
+.preview-editor {
+  min-width: 0;
+  flex: 1;
+}
+
+.preview-tab {
+  height: 44px;
+  width: fit-content;
+  min-width: 128px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(237, 236, 236, 0.62);
+  font-size: 13px;
+}
+
+.preview-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: #0e0e0e;
+  color: rgba(237, 236, 236, 0.62);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.preview-code {
+  display: grid;
+  grid-template-columns: 32px minmax(520px, 1fr);
+  column-gap: 16px;
+  row-gap: 12px;
+  padding: 24px;
+  overflow: auto;
+  color: rgba(237, 236, 236, 0.62);
+  font-family:
+    "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.preview-code code {
+  font-family: inherit;
+}
+
+.line-number {
+  color: rgba(237, 236, 236, 0.62);
+}
+
+.deleted {
+  color: #f87171;
+}
+
+.added {
+  color: #34d399;
+}
+
+@media (max-width: 760px) {
+  .hero {
+    padding-top: 64px;
+  }
+
+  .hero h1 {
+    font-size: clamp(46px, 14vw, 64px);
+  }
+
+  .hero p {
+    margin-top: 24px;
+  }
+
+  .product-preview {
+    height: 520px;
+    border-radius: 18px;
+  }
+
+  .preview-sidebar {
+    width: 160px;
+    flex-basis: 160px;
+    padding: 18px;
+  }
+
+  .preview-pr {
+    padding: 10px;
+    font-size: 12px;
+  }
+
+  .preview-code {
+    padding: 20px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 560px) {
+  .hero {
+    min-height: auto;
+    padding-bottom: 40px;
+  }
+
+  .product-preview {
+    width: calc(100vw - 32px);
+    height: 420px;
+    transform-origin: top center;
+  }
+
+  .preview-sidebar {
+    display: none;
+  }
+
+  .preview-code {
+    grid-template-columns: 28px minmax(420px, 1fr);
+    column-gap: 12px;
+  }
 }

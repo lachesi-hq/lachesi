@@ -2,6 +2,46 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 ---
 
-<BaseLayout>
-  <main class="coming-soon">Coming soon</main>
+<BaseLayout
+  title="Lachesi - PR review with local context"
+  description="Lachesi is a local-first review workspace for Git providers."
+>
+  <main class="landing">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">PR review with local context.</h1>
+        <p>
+          Lachesi is a local-first review workspace for Git providers. Inspect PRs,
+          run AI reviews, capture structured findings, and sync branches locally.
+        </p>
+        <a class="hero-cta" href="https://github.com/lachesi-hq/lachesi">
+          Download Lachesi
+        </a>
+      </div>
+
+      <div class="product-preview" aria-label="Lachesi pull request review preview">
+        <aside class="preview-sidebar">
+          <p class="preview-label">Pull Requests</p>
+          <div class="preview-pr preview-pr-active">feat/auth: cache session</div>
+          <div class="preview-pr">fix: network timeout</div>
+        </aside>
+        <div class="preview-editor">
+          <div class="preview-tab">
+            <span>src/auth.ts</span>
+            <span class="preview-pill">TS</span>
+          </div>
+          <div class="preview-code" aria-label="Code diff preview">
+            <span class="line-number">142</span>
+            <code>async function validateSession(token: string) &#123;</code>
+            <span class="line-number">143</span>
+            <code class="deleted">- const session = await db.sessions.find(token);</code>
+            <span class="line-number">143</span>
+            <code class="added">+ const session = await db.sessions.getCached(token);</code>
+            <span class="line-number">144</span>
+            <code>if (!session || session.expired) &#123;</code>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
 </BaseLayout>
