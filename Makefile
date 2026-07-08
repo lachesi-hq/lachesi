@@ -15,7 +15,7 @@ dev:
 	pnpm run dev
 
 # Start the full Tauri app (real IPC).
-# Requires BITBUCKET_USERNAME and BITBUCKET_TOKEN in the environment.
+# Uses credentials from the OS keychain; if none are stored, BITBUCKET_USERNAME and BITBUCKET_TOKEN env vars are used as a dev fallback.
 tauri-dev:
 	pnpm tauri dev
 
