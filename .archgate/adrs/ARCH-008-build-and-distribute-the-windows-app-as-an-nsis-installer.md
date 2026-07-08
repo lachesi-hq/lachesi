@@ -45,6 +45,16 @@ Scope and explicit non-goals for this ADR:
 - **Code signing is deferred.** Windows builds ship unsigned for now; users will see a SmartScreen "unknown publisher" prompt. Adopting an Authenticode certificate and Tauri's `windows.signCommand`/`certificateThumbprint` configuration MUST be introduced as a separate ADR when a certificate is available.
 - macOS/Linux bundling is out of scope for this ADR and remains governed by `bundle.targets: "all"`.
 
+## Prerequisites
+
+Producing the NSIS installer compiles the Rust backend (see [ARCH-001](./ARCH-001-tauri-react-rust-bitbucket-boundary.md)), so the Windows build host MUST have the following toolchain installed before running `just bundle-windows`:
+
+- **Rust toolchain** — MUST be installed via `winget install Rustlang.Rustup`, which provides the `stable-x86_64-pc-windows-msvc` toolchain. The installer adds `~/.cargo/bin` to the user `PATH`; a **new terminal MUST be opened** afterward so `cargo` resolves.
+- **MSVC C++ Build Tools** — MUST be installed via `winget install Microsoft.VisualStudio.2022.BuildTools` with the **"Desktop development with C++"** workload. This provides the MSVC `link.exe` linker and the Windows SDK that the `*-msvc` Rust toolchain requires. **Without it, `cargo build` fails at the link step** even though `cargo` itself is present.
+- **WebView2 runtime** — is preinstalled on current Windows 10/11. When absent, it MUST be installed via `winget install Microsoft.EdgeWebView2Runtime`.
+
+These are host-machine prerequisites and are not checkable from the repository, so they are enforced by documentation (this section and `CLAUDE.md`) rather than an automated rule.
+
 ## Do's and Don'ts
 
 ### Do
@@ -55,6 +65,7 @@ Scope and explicit non-goals for this ADR:
 - **DO** distribute the generated NSIS setup `.exe` (found under `src-tauri/target/release/bundle/nsis/`) as the Windows artifact.
 - **DO** document, in the release notes, that current Windows builds are unsigned and how to proceed past SmartScreen.
 - **DO** raise a new ADR before adding MSI output, a CI release pipeline, or code signing.
+- **DO** install the Rust toolchain, the MSVC C++ Build Tools ("Desktop development with C++" workload), and the WebView2 runtime before running `just bundle-windows` (see Prerequisites).
 
 ### Don't
 
@@ -64,6 +75,7 @@ Scope and explicit non-goals for this ADR:
 - **DON'T** ship a portable/raw `.exe` without an installer as the primary distributable.
 - **DON'T** add code-signing credentials, certificates, or `signCommand` config under this ADR — that requires its own ADR.
 - **DON'T** rely on an ad-hoc `tauri build` (which under `"all"` also emits an MSI) as the release step; use the explicit `--bundles nsis` command.
+- **DON'T** assume `cargo` alone is sufficient on Windows — without the MSVC C++ Build Tools the link step fails with a missing-linker error.
 
 ## Consequences
 
@@ -86,6 +98,7 @@ Scope and explicit non-goals for this ADR:
 - **SmartScreen erodes user trust:** Unsigned installers look suspicious. **Mitigation:** release notes explicitly document the unsigned status and next steps, and a follow-up signing ADR is called out as the remediation.
 - **Accidental MSI drift:** A contributor could reintroduce MSI as the default. **Mitigation:** an automated `archgate` rule verifies `bundle.targets` still enables NSIS and code review rejects MSI-as-default changes.
 - **Config regression breaks the installer:** Removing the `.ico` or clearing `identifier` silently breaks bundling. **Mitigation:** the companion rule fails the check when `bundle.active`, `bundle.targets` (NSIS), the `.ico` icon, `productName`, or `identifier` are missing or misconfigured.
+- **Missing host toolchain blocks fresh contributors:** On a clean Windows machine the build fails with an opaque `cargo not found` or a linker error. **Mitigation:** the Prerequisites section and `CLAUDE.md` document the exact `winget` commands for the Rust toolchain, MSVC C++ Build Tools, and WebView2 runtime.
 
 ## Implementation Pattern
 
@@ -144,4 +157,5 @@ Exceptions MUST be approved by the lead architect and documented as a separate A
 - [Drive repository commands through platform-native task runners](./ARCH-007-drive-repository-commands-through-platform-native-task-runners.md)
 - `src-tauri/tauri.conf.json` (bundle configuration)
 - [Tauri v2 — Windows Installer (NSIS)](https://tauri.app/distribute/windows-installer/)
+- [Tauri v2 — Prerequisites (Rust, MSVC Build Tools, WebView2)](https://tauri.app/start/prerequisites/)
 - [Tauri v2 — Code Signing (Windows)](https://tauri.app/distribute/sign/windows/)

@@ -25,6 +25,11 @@ Repository commands are also wrapped by platform-native task runners at the repo
 
 The Windows distributable is the Tauri **NSIS setup `.exe`**, built locally on Windows with `just bundle-windows` (`pnpm tauri build --bundles nsis`). Output lands at `src-tauri/target/release/bundle/nsis/Lachesi_<version>_x64-setup.exe`. Builds are currently **unsigned** (SmartScreen warning) and MSI/CI/code-signing are out of scope until a follow-up ADR.
 
+**Windows build prerequisites** (needed for `just bundle-windows` / `pnpm tauri dev`, not for `just dev`):
+- **Rust toolchain** — `winget install Rustlang.Rustup` (installs `stable-x86_64-pc-windows-msvc`; adds `~/.cargo/bin` to PATH — open a new terminal after installing).
+- **MSVC C++ Build Tools** — `winget install Microsoft.VisualStudio.2022.BuildTools` with the **"Desktop development with C++"** workload. Provides the MSVC `link.exe` linker + Windows SDK that the `*-msvc` Rust toolchain requires. Without it, `cargo build` fails at the link step.
+- **WebView2 runtime** — preinstalled on current Windows 10/11; otherwise `winget install Microsoft.EdgeWebView2Runtime`.
+
 ## Key Architecture Notes
 
 ### IPC boundary
