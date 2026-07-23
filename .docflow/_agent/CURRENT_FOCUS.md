@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`128166c` - scrollable terminal review panes and accent styling.
+`83fa971` - refined terminal review reading with wrapped scrolling, AI review markers, and a narrower repository pane.
 
 ## Next item
 
