@@ -2013,53 +2013,59 @@ pub async fn create_general_comment(
     raw: String,
     parent_id: Option<u32>,
 ) -> Result<PrComment, String> {
-    run(move || {
-        if dry_run() {
-            eprintln!("[dry-run] general comment on PR #{id}: {raw}");
-            return Ok(PrComment {
-                id: 0,
-                parent_id,
-                content_raw: raw,
-                content_html: None,
-                user_display_name: "dry-run".to_string(),
-                created_on: String::new(),
-                deleted: false,
-                inline: None,
-            });
-        }
-        match provider_for(provider, &workspace, &repo) {
-            ReviewProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored()?;
-                let url = format!(
-                    "{}/pullrequests/{id}/comments",
-                    repo_base(&workspace, &repo)?
-                );
-                let mut body = json!({ "content": { "raw": raw } });
-                if let Some(parent_id) = parent_id {
-                    body["parent"] = json!({ "id": parent_id });
-                }
-                let bb: BbComment = get_json(client.post(&url).json(&body))?;
-                Ok(map_comment(bb))
+    run(move || create_general_comment_native(provider, &workspace, &repo, id, raw, parent_id))
+        .await
+}
+
+pub fn create_general_comment_native(
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    raw: String,
+    parent_id: Option<u32>,
+) -> Result<PrComment, String> {
+    if dry_run() {
+        eprintln!("[dry-run] general comment on PR #{id}: {raw}");
+        return Ok(PrComment {
+            id: 0,
+            parent_id,
+            content_raw: raw,
+            content_html: None,
+            user_display_name: "dry-run".to_string(),
+            created_on: String::new(),
+            deleted: false,
+            inline: None,
+        });
+    }
+    match provider_for(provider, workspace, repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            let url = format!("{}/pullrequests/{id}/comments", repo_base(workspace, repo)?);
+            let mut body = json!({ "content": { "raw": raw } });
+            if let Some(parent_id) = parent_id {
+                body["parent"] = json!({ "id": parent_id });
             }
-            ReviewProvider::Github => {
-                let client = GithubClient::from_stored()?;
-                let base = github_repo_base(&workspace, &repo)?;
-                if let Some(parent_id) = parent_id {
-                    let url = format!("{base}/pulls/{id}/comments/{parent_id}/replies");
-                    if let Ok(comment) = github_get_json::<GhReviewComment>(
-                        client.post(&url).json(&json!({ "body": raw })),
-                    ) {
-                        return Ok(map_gh_review_comment(comment));
-                    }
-                }
-                let url = format!("{base}/issues/{id}/comments");
-                let comment: GhIssueComment =
-                    github_get_json(client.post(&url).json(&json!({ "body": raw })))?;
-                Ok(map_gh_issue_comment(comment))
-            }
+            let bb: BbComment = get_json(client.post(&url).json(&body))?;
+            Ok(map_comment(bb))
         }
-    })
-    .await
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            let base = github_repo_base(workspace, repo)?;
+            if let Some(parent_id) = parent_id {
+                let url = format!("{base}/pulls/{id}/comments/{parent_id}/replies");
+                if let Ok(comment) = github_get_json::<GhReviewComment>(
+                    client.post(&url).json(&json!({ "body": raw })),
+                ) {
+                    return Ok(map_gh_review_comment(comment));
+                }
+            }
+            let url = format!("{base}/issues/{id}/comments");
+            let comment: GhIssueComment =
+                github_get_json(client.post(&url).json(&json!({ "body": raw })))?;
+            Ok(map_gh_issue_comment(comment))
+        }
+    }
 }
 
 #[tauri::command]

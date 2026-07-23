@@ -17,8 +17,16 @@ pub struct TuiState<'a> {
     pub detail: Option<&'a PullRequestDetail>,
     pub comments: &'a [PrComment],
     pub diff: Option<&'a str>,
+    pub drafts: &'a [DraftComment],
+    pub composer: Option<&'a str>,
     pub error: Option<&'a str>,
     pub status: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftComment {
+    pub id: u64,
+    pub raw: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,12 +170,17 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
                 detail.state,
                 state.comments.len()
             )));
+            lines.push(Line::from(format!(
+                "Drafts: {} pending",
+                state.drafts.len()
+            )));
             lines.push(Line::from(""));
             lines.push(Line::from(description_preview(
                 detail.description_raw.as_str(),
             )));
             lines.push(Line::from(""));
             lines.push(Line::from(diff_preview(state.diff)));
+            append_draft_preview(&mut lines, state.drafts);
         }
         None => match state.repos.get(state.selected_repo) {
             Some(repo) => {
@@ -201,6 +214,14 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
         },
     }
 
+    if let Some(composer) = state.composer {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Draft: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(composer),
+        ]));
+    }
+
     let detail = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .block(Block::default().title("Review").borders(Borders::ALL));
@@ -213,11 +234,29 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         Span::raw("tab focus  "),
         Span::raw("j/k select  "),
         Span::raw("enter load  "),
+        Span::raw("c draft  "),
+        Span::raw("p publish  "),
+        Span::raw("x discard  "),
         Span::raw("g lazygit  "),
         Span::raw("r refresh  "),
         Span::raw(status),
     ]));
     frame.render_widget(footer, area);
+}
+
+fn append_draft_preview(lines: &mut Vec<Line<'_>>, drafts: &[DraftComment]) {
+    if drafts.is_empty() {
+        return;
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("Pending drafts:"));
+    for draft in drafts.iter().take(3) {
+        lines.push(Line::from(format!(
+            "- #{} {}",
+            draft.id,
+            description_preview(draft.raw.as_str())
+        )));
+    }
 }
 
 fn description_preview(description: &str) -> String {
@@ -288,6 +327,8 @@ mod tests {
                         detail: None,
                         comments: &[],
                         diff: None,
+                        drafts: &[],
+                        composer: None,
                         error: None,
                         status: "Ready",
                     },
@@ -338,6 +379,8 @@ mod tests {
                         detail: None,
                         comments: &[],
                         diff: None,
+                        drafts: &[],
+                        composer: None,
                         error: None,
                         status: "Ready",
                     },
@@ -394,6 +437,11 @@ mod tests {
                         detail: Some(&detail),
                         comments: &comments,
                         diff: Some("diff --git a/a b/a\n+new\n-old\n"),
+                        drafts: &[DraftComment {
+                            id: 1,
+                            raw: "Please check this.".to_string(),
+                        }],
+                        composer: None,
                         error: None,
                         status: "Loaded",
                     },
@@ -404,6 +452,38 @@ mod tests {
         let text = buffer_text(&terminal);
         assert!(text.contains("#12 Add terminal UI"));
         assert!(text.contains("1 comments"));
+        assert!(text.contains("Drafts: 1 pending"));
         assert!(text.contains("Diff: 1 files, +1/-1"));
+    }
+
+    #[test]
+    fn renders_active_composer_text() {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::PullRequests,
+                        pull_requests: &[],
+                        selected_pr: 0,
+                        detail: None,
+                        comments: &[],
+                        diff: None,
+                        drafts: &[],
+                        composer: Some("pending thought"),
+                        error: None,
+                        status: "Composing",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("Draft: pending thought"));
     }
 }
