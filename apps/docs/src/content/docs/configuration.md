@@ -27,6 +27,9 @@ version: "0.1"
 review:
   profile: frontend-strict
   mode: balanced
+  prompt:
+    replace: |
+      Full repository-owned review prompt.
   findings:
     minSeverity: low
 profiles:
@@ -58,8 +61,8 @@ Policy packs can contribute prompt extensions, rules, path rules, profiles, and 
 
 If a repository does not have `.lachesi.yaml`, Lachesi also reads a
 `.lachesi/` folder. `system-prompt.md`, `review-prompt.md`, `review.md`, or
-`prompt.md` extend the review prompt, and `packs/*/pack.yaml` entries are
-loaded as local policy packs. When both exist, `.lachesi.yaml` wins.
+`prompt.md` replace the built-in review prompt, and `packs/*/pack.yaml` entries
+are loaded as local policy packs. When both exist, `.lachesi.yaml` wins.
 
 The repository includes a loadable prototype pack at `examples/policy-packs/agentic-code`. Use it as a local-path example for agentic-code review rules, named profiles, analyzer defaults, and structured output samples.
 

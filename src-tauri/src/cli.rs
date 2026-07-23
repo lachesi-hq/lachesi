@@ -26,6 +26,7 @@ struct ConfigValidateOutput {
     config_path: String,
     exists: bool,
     selected_profile: Option<String>,
+    prompt_replaces_default: bool,
     loaded_policy_packs: Vec<LoadedPolicyPack>,
     warnings: Vec<RepoConfigValidationMessage>,
     errors: Vec<RepoConfigValidationMessage>,
@@ -139,6 +140,14 @@ fn run_config_validate(
         config_path: result.config_path,
         exists: result.exists,
         selected_profile: result.selected_profile,
+        prompt_replaces_default: result
+            .config
+            .as_ref()
+            .and_then(|config| config.review.as_ref())
+            .and_then(|review| review.prompt.as_ref())
+            .and_then(|prompt| prompt.replace.as_deref())
+            .map(str::trim)
+            .is_some_and(|prompt| !prompt.is_empty()),
         loaded_policy_packs: result.loaded_policy_packs,
         warnings: result.warnings,
         errors: result.errors,
@@ -179,6 +188,9 @@ fn write_human_output(output: &ConfigValidateOutput, out: &mut dyn Write) -> io:
     }
     if let Some(profile) = output.selected_profile.as_deref() {
         writeln!(out, "Profile: {profile}")?;
+    }
+    if output.prompt_replaces_default {
+        writeln!(out, "Prompt: replaces built-in default")?;
     }
     if !output.loaded_policy_packs.is_empty() {
         writeln!(out, "Loaded policy packs:")?;

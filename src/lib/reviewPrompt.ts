@@ -72,10 +72,12 @@ export async function resolveReviewPrompt(
     throw new Error(result.errors.map((error) => error.message).join("\n"));
   }
 
+  const replacement = result.config?.review?.prompt?.replace?.trim();
   const extension = result.config?.review?.prompt?.extend?.trim();
+  const basePrompt = replacement || DEFAULT_REVIEW_PROMPT;
   const prompt = extension
-    ? `${DEFAULT_REVIEW_PROMPT}\n\n## Repository review policy\n${extension}`
-    : DEFAULT_REVIEW_PROMPT;
+    ? `${basePrompt}\n\n## Repository review policy\n${extension}`
+    : basePrompt;
 
   return {
     prompt,

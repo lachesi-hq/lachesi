@@ -552,21 +552,25 @@ impl TuiApp {
                 .collect::<Vec<_>>()
                 .join("\n"));
         }
-        let extension = result
+        let prompt = result
             .config
             .and_then(|config| config.review)
             .and_then(|review| review.prompt)
-            .and_then(|prompt| prompt.extend)
+            .unwrap_or_default();
+        let replacement = prompt
+            .replace
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        let extension = prompt
+            .extend
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let base_prompt = replacement.unwrap_or_else(default_review_prompt);
         Ok(match extension {
             Some(extension) => {
-                format!(
-                    "{}\n\n## Repository review policy\n{extension}",
-                    default_review_prompt()
-                )
+                format!("{base_prompt}\n\n## Repository review policy\n{extension}")
             }
-            None => default_review_prompt(),
+            None => base_prompt,
         })
     }
 
@@ -752,6 +756,8 @@ fn default_review_prompt() -> String {
 mod tests {
     use super::*;
     use crate::config::ReviewProvider;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn repo(workspace: &str, repo: &str) -> RepoRef {
         RepoRef {
@@ -795,6 +801,14 @@ mod tests {
             created_on: String::new(),
             updated_on: String::new(),
         }
+    }
+
+    fn temp_repo_path(name: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("lachesi-tui-{name}-{}-{nonce}", std::process::id()))
     }
 
     #[test]
@@ -960,5 +974,39 @@ mod tests {
         assert!(payload.contains("Add GitHub TUI support (#7)"));
         assert!(payload.contains("Branch: feature/7 -> main"));
         assert!(payload.contains("```diff\ndiff --git a/a b/a\n+new\n```"));
+    }
+
+    #[test]
+    fn lachesi_folder_prompt_replaces_default_prompt() {
+        let repo_path = temp_repo_path("prompt-replace");
+        let lachesi_dir = repo_path.join(".lachesi");
+        let pack_dir = lachesi_dir.join("packs/team-rules");
+        fs::create_dir_all(&pack_dir).expect("create lachesi folder");
+        fs::write(lachesi_dir.join("system-prompt.md"), "Replacement prompt.")
+            .expect("write prompt");
+        fs::write(
+            pack_dir.join("pack.yaml"),
+            r#"
+id: team-rules
+review:
+  prompt:
+    extend: Policy pack prompt.
+"#,
+        )
+        .expect("write pack");
+
+        let mut repo = repo("lachesi-hq", "lachesi");
+        repo.local_path = Some(repo_path.display().to_string());
+        let app = TuiApp::from_repos(vec![repo]);
+
+        let prompt = app
+            .review_prompt_for_selected_repo()
+            .expect("resolve prompt");
+
+        assert!(prompt.starts_with("Replacement prompt."));
+        assert!(prompt.contains("Policy pack prompt."));
+        assert!(!prompt
+            .contains("You are a senior software engineer doing a thorough pull request review."));
+        let _ = fs::remove_dir_all(repo_path);
     }
 }

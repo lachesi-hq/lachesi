@@ -78,6 +78,8 @@ pub enum ReviewMode {
 pub struct PromptConfig {
     #[serde(default)]
     pub extend: Option<String>,
+    #[serde(default)]
+    pub replace: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
@@ -367,7 +369,8 @@ fn load_from_lachesi_dir(
     if let Some(prompt) = load_lachesi_dir_prompt(&lachesi_dir)? {
         config.review = Some(ReviewConfig {
             prompt: Some(PromptConfig {
-                extend: Some(prompt),
+                replace: Some(prompt),
+                ..PromptConfig::default()
             }),
             ..ReviewConfig::default()
         });
@@ -802,16 +805,18 @@ fn merge_prompt_config(target: &mut Option<PromptConfig>, pack_prompt: Option<Pr
     let Some(pack_prompt) = pack_prompt else {
         return;
     };
-    let Some(pack_extend) = pack_prompt.extend else {
-        return;
-    };
     let target = target.get_or_insert_with(PromptConfig::default);
-    target.extend = match target.extend.take() {
-        Some(existing) if !existing.trim().is_empty() => {
-            Some(format!("{pack_extend}\n\n{existing}"))
+    if target.replace.is_none() {
+        target.replace = pack_prompt.replace;
+    }
+    if let Some(pack_extend) = pack_prompt.extend {
+        target.extend = match target.extend.take() {
+            Some(existing) if !existing.trim().is_empty() => {
+                Some(format!("{pack_extend}\n\n{existing}"))
+            }
+            _ => Some(pack_extend),
         }
-        _ => Some(pack_extend),
-    };
+    }
 }
 
 fn result(
@@ -942,7 +947,7 @@ fn known_keys(context: Option<&str>, key: &str) -> Option<&'static [&'static str
         ]),
         Some("review") => Some(&["profile", "mode", "prompt", "findings"]),
         Some("profile") => Some(&["mode", "minSeverity", "prompt", "policyPacks", "analyzers"]),
-        Some("prompt") => Some(&["extend"]),
+        Some("prompt") => Some(&["extend", "replace"]),
         Some("findings") => Some(&["minSeverity", "requireAnchors"]),
         Some("paths") | Some("appliesTo") => Some(&["include", "exclude"]),
         Some("policy") => Some(&[
@@ -1466,9 +1471,16 @@ policy:
             .review
             .as_ref()
             .and_then(|review| review.prompt.as_ref())
-            .and_then(|prompt| prompt.extend.as_deref())
+            .and_then(|prompt| prompt.replace.as_deref())
             .expect("prompt");
-        assert_eq!(prompt, "Pack prompt.\n\nRepository system prompt.");
+        assert_eq!(prompt, "Repository system prompt.");
+        let policy_prompt = config
+            .review
+            .as_ref()
+            .and_then(|review| review.prompt.as_ref())
+            .and_then(|prompt| prompt.extend.as_deref())
+            .expect("policy prompt");
+        assert_eq!(policy_prompt, "Pack prompt.");
         assert_eq!(config.policy.expect("policy").rules.len(), 1);
         let _ = fs::remove_dir_all(repo);
     }

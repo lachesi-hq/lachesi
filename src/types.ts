@@ -570,7 +570,7 @@ export interface RepoReviewConfig {
   review?: {
     profile?: string | null;
     mode?: RepoReviewMode | null;
-    prompt?: { extend?: string | null } | null;
+    prompt?: { extend?: string | null; replace?: string | null } | null;
     findings?: {
       minSeverity?: RepoReviewSeverity | null;
       requireAnchors?: boolean | null;
@@ -581,7 +581,7 @@ export interface RepoReviewConfig {
     {
       mode?: RepoReviewMode | null;
       minSeverity?: RepoReviewSeverity | null;
-      prompt?: { extend?: string | null } | null;
+      prompt?: { extend?: string | null; replace?: string | null } | null;
       policyPacks: string[];
       analyzers: Record<string, RepoProfileAnalyzerRequirement>;
     }

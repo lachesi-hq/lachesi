@@ -72,7 +72,7 @@ This optional folder is a lighter-weight committed review configuration. Lachesi
 uses it only when `.lachesi.yaml` is absent. It owns:
 
 - `system-prompt.md`, `review-prompt.md`, `review.md`, or `prompt.md` as a
-  repository-owned review prompt extension, checked in priority order
+  repository-owned review prompt replacement, checked in priority order
 - `packs/*/pack.yaml` policy packs loaded as local policy packs
 
 If both `.lachesi.yaml` and `.lachesi/` exist, `.lachesi.yaml` is the explicit
@@ -126,8 +126,10 @@ review:
   profile: frontend-strict
   mode: balanced
   prompt:
+    replace: |
+      Full team-specific review instructions.
     extend: |
-      Extra team-specific review instructions.
+      Extra team-specific review policy appended after the active prompt.
   findings:
     minSeverity: low
     requireAnchors: false
@@ -245,13 +247,24 @@ Profile fields:
 `required` enables an analyzer already defined by the repo or loaded packs. If no
 analyzer config exists for that id, Lachesi warns and continues.
 
+### `review.prompt.replace`
+
+Optional. Replaces the built-in review prompt with a full repository-owned
+prompt. Use this when the repository needs to own the whole system prompt shape,
+including output format instructions.
+
+When Lachesi loads `.lachesi/system-prompt.md`, `.lachesi/review-prompt.md`,
+`.lachesi/review.md`, or `.lachesi/prompt.md`, it maps that file to
+`review.prompt.replace`.
+
 ### `review.prompt.extend`
 
 Optional. Appended to the built-in review prompt after repo config is resolved.
 
-This is the committed team-level prompt extension. It has lower precedence than
-the current local per-repo prompt override and lower precedence than session
-instructions.
+This is the committed team-level prompt extension. If `review.prompt.replace`
+is present, the extension is appended to that replacement prompt instead of to
+the built-in default. It has lower precedence than the current local per-repo
+prompt override and lower precedence than session instructions.
 
 ### `review.findings.minSeverity`
 
@@ -311,6 +324,7 @@ the entry is a directory, Lachesi looks for `pack.yaml`, `lachesi-pack.yaml`, or
 Pack manifests may provide:
 
 - `review.prompt.extend`
+- `review.prompt.replace`
 - `policy.rules`
 - `policy.pathRules`
 - `policy.astRules`
@@ -319,6 +333,7 @@ Pack manifests may provide:
 
 Pack analyzer entries are defaults: a repo-level analyzer with the same id wins.
 Pack prompt extensions are prepended before the repo-owned prompt extension.
+Pack prompt replacements apply only when the active prompt has no replacement.
 Missing packs produce warnings. Credential-like fields inside pack manifests are
 blocking validation errors.
 
@@ -383,14 +398,13 @@ behavior, while app config should control local ergonomics.
 
 The effective prompt for a review is built in this order:
 
-1. built-in `DEFAULT_REVIEW_PROMPT`
-2. committed `review.prompt.extend` from `.lachesi.yaml`
+1. built-in `DEFAULT_REVIEW_PROMPT`, unless replaced by committed
+   `review.prompt.replace` or a `.lachesi/` prompt file
+2. committed `review.prompt.extend` from `.lachesi.yaml` or policy packs
 3. local per-repo prompt override from browser storage
 4. explicit session instruction
 
-Local prompt overrides currently replace the built-in prompt in code. v0.1
-should migrate that behavior toward "repo prompt extension plus local/session
-extension" so committed policy remains visible and reproducible.
+Local prompt overrides replace the resolved repo prompt for that machine.
 
 ## Validation
 
