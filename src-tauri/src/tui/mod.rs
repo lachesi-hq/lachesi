@@ -1,3 +1,4 @@
+mod lazygit;
 mod render;
 mod terminal;
 
@@ -32,6 +33,12 @@ pub fn run_from_env() -> Result<(), String> {
 
         if event::poll(TICK_RATE).map_err(|error| error.to_string())? {
             match event::read().map_err(|error| error.to_string())? {
+                Event::Key(key) if key.code == KeyCode::Char('g') => {
+                    let result = terminal
+                        .suspend(|| app.run_lazygit())
+                        .map_err(|error| error.to_string())?;
+                    app.finish_external_action(result);
+                }
                 Event::Key(key) => app.handle_key(key.code),
                 Event::Resize(_, _) => {}
                 _ => {}
@@ -243,6 +250,26 @@ impl TuiApp {
         }
     }
 
+    fn run_lazygit(&self) -> Result<(), String> {
+        let Some(repo) = self.repos.get(self.selected_repo) else {
+            return Err("No repository selected.".to_string());
+        };
+        lazygit::run_for_repo(repo)
+    }
+
+    fn finish_external_action(&mut self, result: Result<(), String>) {
+        match result {
+            Ok(()) => {
+                self.status = "Returned from lazygit".to_string();
+                self.error = None;
+            }
+            Err(error) => {
+                self.status = "Failed to launch lazygit".to_string();
+                self.error = Some(error);
+            }
+        }
+    }
+
     fn view_state(&self) -> TuiState<'_> {
         TuiState {
             repos: &self.repos,
@@ -292,5 +319,24 @@ mod tests {
         app.handle_key(KeyCode::Char('q'));
 
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn lazygit_without_selected_repo_is_reported() {
+        let app = TuiApp::from_repos(Vec::new());
+
+        let error = app.run_lazygit().expect_err("missing repo should fail");
+
+        assert_eq!(error, "No repository selected.");
+    }
+
+    #[test]
+    fn external_action_error_updates_status() {
+        let mut app = TuiApp::from_repos(Vec::new());
+
+        app.finish_external_action(Err("missing lazygit".to_string()));
+
+        assert_eq!(app.status, "Failed to launch lazygit");
+        assert_eq!(app.error.as_deref(), Some("missing lazygit"));
     }
 }

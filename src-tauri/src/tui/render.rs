@@ -213,6 +213,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         Span::raw("tab focus  "),
         Span::raw("j/k select  "),
         Span::raw("enter load  "),
+        Span::raw("g lazygit  "),
         Span::raw("r refresh  "),
         Span::raw(status),
     ]));
