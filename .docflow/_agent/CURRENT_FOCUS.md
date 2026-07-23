@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`458d2d3` - terminal AI review running markers and full-output clipboard copy.
+`1de1eba` - parallel terminal AI reviews across different pull requests.
 
 ## Next item
 
