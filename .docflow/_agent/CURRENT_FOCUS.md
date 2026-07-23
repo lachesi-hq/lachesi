@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`3f65b76` - add the terminal PR filter panel.
+`4cf30c4` - open lazygit on the selected pull request branch.
 
 ## Next item
 
