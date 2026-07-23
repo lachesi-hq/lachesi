@@ -2107,7 +2107,9 @@ pub async fn delete_comment(
 mod tests {
     use super::*;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn pr_query_filter_combines_title_and_updated_window() {
@@ -2146,12 +2148,11 @@ mod tests {
 
     #[test]
     fn native_repo_config_validation_uses_shared_loader() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let repo_path =
-            std::env::temp_dir().join(format!("lachesi-native-config-validation-{nonce}"));
+        let nonce = TEMP_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let repo_path = std::env::temp_dir().join(format!(
+            "lachesi-native-config-validation-{}-{nonce}",
+            std::process::id()
+        ));
         fs::create_dir_all(&repo_path).expect("create temp repo");
         fs::write(repo_path.join(".lachesi.yaml"), "version: 0.1\n").expect("write config");
 

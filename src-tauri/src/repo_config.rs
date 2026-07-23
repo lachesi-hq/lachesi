@@ -996,14 +996,16 @@ mod tests {
     use super::{load_from_repo_path, load_from_str, RepoReviewConfigLoadResult};
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_repo() -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("lachesi-repo-config-test-{nonce}"));
+        let nonce = TEMP_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "lachesi-repo-config-test-{}-{nonce}",
+            std::process::id()
+        ));
         fs::create_dir_all(&path).expect("create temp repo");
         path
     }
