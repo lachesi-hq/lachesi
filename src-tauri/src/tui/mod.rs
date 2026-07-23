@@ -483,11 +483,14 @@ impl TuiApp {
     }
 
     fn start_ai_review(&mut self) {
+        if self.detail.as_ref().map(|detail| detail.id) != self.selected_pull_request_id() {
+            self.load_selected_pr();
+        }
         let Some((provider, workspace, repo, pr_id)) = self.selected_review_target() else {
             self.status = "Select a pull request before starting AI review".to_string();
             return;
         };
-        let Some(detail) = self.detail.as_ref() else {
+        let Some(detail) = self.detail.as_ref().filter(|detail| detail.id == pr_id) else {
             self.status = "Load pull request detail before starting AI review".to_string();
             return;
         };
@@ -687,6 +690,7 @@ impl TuiApp {
     }
 
     fn refresh_ai_review_state(&mut self) {
+        self.refresh_running_ai_review_markers();
         let Some((workspace, repo, pr_id)) = self.active_ai_target.as_ref() else {
             return;
         };
@@ -727,17 +731,63 @@ impl TuiApp {
         }
     }
 
-    fn refresh_ai_review_markers(&mut self, workspace: &str, repo: &str) {
-        self.ai_reviewed_pr_ids = self
+    fn refresh_running_ai_review_markers(&mut self) {
+        let Some(repo) = self.repos.get(self.selected_repo) else {
+            self.ai_review_running_pr_ids.clear();
+            return;
+        };
+        let workspace = repo.workspace.clone();
+        let repo_name = repo.repo.clone();
+        let pr_ids = self
             .pull_requests
             .iter()
-            .filter_map(
-                |pr| match load_ai_review_store_native(workspace, repo, pr.id) {
-                    Ok(Some(store)) if !store.review_runs.is_empty() => Some(pr.id),
-                    _ => None,
-                },
-            )
-            .collect();
+            .map(|pr| pr.id)
+            .collect::<Vec<_>>();
+        let mut running = Vec::new();
+        let mut finished = Vec::new();
+        for pr_id in pr_ids {
+            let Some(state) = get_ai_review_run_state_native(
+                &self.ai_review_store,
+                &workspace,
+                &repo_name,
+                pr_id,
+            ) else {
+                continue;
+            };
+            match state.status {
+                AiReviewRunStatus::Running => running.push(pr_id),
+                AiReviewRunStatus::Succeeded => finished.push(pr_id),
+                AiReviewRunStatus::Failed
+                | AiReviewRunStatus::Cancelled
+                | AiReviewRunStatus::Idle => {}
+            }
+        }
+        self.ai_review_running_pr_ids = running;
+        for pr_id in finished {
+            self.mark_ai_reviewed(pr_id);
+        }
+    }
+
+    fn refresh_ai_review_markers(&mut self, workspace: &str, repo: &str) {
+        let mut reviewed = Vec::new();
+        let mut running = Vec::new();
+        for pr in &self.pull_requests {
+            if matches!(
+                get_ai_review_run_state_native(&self.ai_review_store, workspace, repo, pr.id)
+                    .map(|state| state.status),
+                Some(AiReviewRunStatus::Running)
+            ) {
+                running.push(pr.id);
+            }
+            if matches!(
+                load_ai_review_store_native(workspace, repo, pr.id),
+                Ok(Some(store)) if !store.review_runs.is_empty()
+            ) {
+                reviewed.push(pr.id);
+            }
+        }
+        self.ai_reviewed_pr_ids = reviewed;
+        self.ai_review_running_pr_ids = running;
     }
 
     fn mark_ai_reviewed(&mut self, pr_id: u32) {

@@ -388,7 +388,6 @@ struct ReviewRunSessionRecord {
 #[derive(Default)]
 struct AiReviewRunStoreInner {
     sessions: HashMap<String, ReviewRunSessionRecord>,
-    active_key: Option<String>,
     next_run_id: u64,
 }
 
@@ -2047,15 +2046,12 @@ fn begin_inline_review_run(
     review_kind: Option<&str>,
 ) -> Result<(AiReviewRunState, u64), String> {
     with_review_run_store(store, |inner| {
-        if let Some(active) = inner.active_key.as_deref() {
-            if active == key {
-                return Err("An AI review is already running for this pull request.".to_string());
-            }
-            return Err(format!(
-                "Another AI review is already running for {active}. Wait for it to finish first."
-            ));
+        if matches!(
+            inner.sessions.get(key).map(|session| session.public.status),
+            Some(AiReviewRunStatus::Running)
+        ) {
+            return Err("An AI review is already running for this pull request.".to_string());
         }
-        inner.active_key = Some(key.to_string());
         inner.next_run_id = inner.next_run_id.saturating_add(1);
         let run_id = inner.next_run_id;
         let session = ensure_review_run_session(inner, key);
@@ -2211,9 +2207,6 @@ fn set_inline_review_failed(
         session.public.error = Some(error.clone());
         session.public.logs.push(format!("ERROR: {error}"));
         trim_logs(&mut session.public.logs);
-        if inner.active_key.as_deref() == Some(key) {
-            inner.active_key = None;
-        }
     });
 }
 
@@ -2241,9 +2234,6 @@ fn finish_inline_review_success(
             .logs
             .push(format!("{provider_label} finished successfully."));
         trim_logs(&mut session.public.logs);
-        if inner.active_key.as_deref() == Some(key) {
-            inner.active_key = None;
-        }
     });
 }
 
@@ -2265,9 +2255,6 @@ fn mark_inline_review_cancelled(store: &AiReviewRunStore, key: &str, run_id: u64
             .logs
             .push("Review cancelled by the user.".to_string());
         trim_logs(&mut session.public.logs);
-        if inner.active_key.as_deref() == Some(key) {
-            inner.active_key = None;
-        }
     });
 }
 
@@ -5114,9 +5101,6 @@ pub fn cancel_inline_review(
         trim_logs(&mut session.public.logs);
         let run_id = session.run_id;
         let pid = session.child_pid;
-        if inner.active_key.as_deref() == Some(&key) {
-            inner.active_key = None;
-        }
         Ok((session.public.clone(), run_id, pid))
     })?;
 
@@ -5508,14 +5492,15 @@ pub fn reset_ai_review_fix_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_review_finding_publication_event, build_codex_text_command, extract_review_findings,
-        format_claude_stream_log_line, human_duration, materialize_review_run,
-        normalize_codex_effort, normalize_codex_model, parse_claude_fix_result,
-        parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
-        review_findings_from_output, AiReviewDraftCommentResult, AiReviewTurnKind,
-        ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
-        ReviewFindingConfidence, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
-        ReviewFindingSeverity, ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
+        apply_review_finding_publication_event, begin_inline_review_run, build_codex_text_command,
+        extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
+        human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
+        parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
+        parse_review_resources, review_findings_from_output, AiReviewDraftCommentResult,
+        AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind, ReviewEvidenceArtifact,
+        ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory, ReviewFindingConfidence,
+        ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind, ReviewFindingSeverity,
+        ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
 
     #[test]
@@ -5597,6 +5582,75 @@ mod tests {
 
         let _ = std::fs::remove_file(prompt_path);
         let _ = std::fs::remove_file(output_path);
+    }
+
+    #[test]
+    fn review_run_store_allows_parallel_reviews_for_different_pull_requests() {
+        let store = AiReviewRunStore::default();
+
+        let (first, first_run_id) = begin_inline_review_run(
+            &store,
+            "workspace/repo/1",
+            "First".to_string(),
+            "thread-1".to_string(),
+            AiReviewTurnKind::Initial,
+            None,
+        )
+        .expect("first review should start");
+        let (second, second_run_id) = begin_inline_review_run(
+            &store,
+            "workspace/repo/2",
+            "Second".to_string(),
+            "thread-2".to_string(),
+            AiReviewTurnKind::Initial,
+            None,
+        )
+        .expect("second PR review should start concurrently");
+
+        assert_eq!(first.status, AiReviewRunStatus::Running);
+        assert_eq!(second.status, AiReviewRunStatus::Running);
+        assert_ne!(first_run_id, second_run_id);
+        assert_eq!(
+            get_ai_review_run_state_native(&store, "workspace", "repo", 1)
+                .expect("first state")
+                .status,
+            AiReviewRunStatus::Running
+        );
+        assert_eq!(
+            get_ai_review_run_state_native(&store, "workspace", "repo", 2)
+                .expect("second state")
+                .status,
+            AiReviewRunStatus::Running
+        );
+    }
+
+    #[test]
+    fn review_run_store_rejects_parallel_reviews_for_same_pull_request() {
+        let store = AiReviewRunStore::default();
+
+        begin_inline_review_run(
+            &store,
+            "workspace/repo/1",
+            "First".to_string(),
+            "thread-1".to_string(),
+            AiReviewTurnKind::Initial,
+            None,
+        )
+        .expect("first review should start");
+        let error = begin_inline_review_run(
+            &store,
+            "workspace/repo/1",
+            "Duplicate".to_string(),
+            "thread-2".to_string(),
+            AiReviewTurnKind::Initial,
+            None,
+        )
+        .expect_err("same PR should still be locked");
+
+        assert_eq!(
+            error,
+            "An AI review is already running for this pull request."
+        );
     }
 
     #[test]
