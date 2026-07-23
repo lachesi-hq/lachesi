@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`2eedb4b` - terminal UI mouse, GitHub, and AI review controls.
+`b872d78` - terminal UI `.lachesi/` policy loading and AI review output view.
 
 ## Next item
 
