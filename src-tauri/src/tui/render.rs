@@ -1,9 +1,10 @@
+use std::cmp;
+
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     prelude::{Color, Frame, Line, Modifier, Span, Style},
     widgets::{
         Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
-        Wrap,
     },
 };
 
@@ -20,6 +21,7 @@ pub struct TuiState<'a> {
     pub selected_pr: usize,
     pub detail: Option<&'a PullRequestDetail>,
     pub comments: &'a [PrComment],
+    pub ai_reviewed_pr_ids: &'a [u32],
     pub diff: Option<&'a str>,
     pub drafts: &'a [DraftComment],
     pub composer: Option<&'a str>,
@@ -136,7 +138,7 @@ fn vertical_areas() -> Layout {
 fn body_areas() -> Layout {
     Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(36), Constraint::Percentage(64)])
+        .constraints([Constraint::Percentage(28), Constraint::Percentage(72)])
 }
 
 fn review_areas() -> Layout {
@@ -248,6 +250,7 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
             .enumerate()
             .map(|(index, pr)| {
                 let selected = index == state.selected_pr;
+                let reviewed = state.ai_reviewed_pr_ids.contains(&pr.id);
                 let marker = if selected { ">" } else { " " };
                 ListItem::new(Line::from(vec![
                     Span::styled(
@@ -259,6 +262,14 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
                         },
                     ),
                     Span::raw(" "),
+                    Span::styled(
+                        if reviewed { "[AI] " } else { "[--] " },
+                        if reviewed {
+                            success_style().add_modifier(Modifier::BOLD)
+                        } else {
+                            muted_style()
+                        },
+                    ),
                     Span::styled(format!("#{} ", pr.id), info_style()),
                     Span::styled(pr.source_branch.clone(), branch_style()),
                     Span::styled(" -> ", muted_style()),
@@ -332,7 +343,11 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
                 Span::styled(format!("{} pending", state.drafts.len()), text_style()),
             ]));
             lines.push(Line::from(""));
-            append_description_lines(&mut lines, detail.description_raw.as_str());
+            append_description_lines(
+                &mut lines,
+                detail.description_raw.as_str(),
+                content_width(area),
+            );
             lines.push(Line::from(""));
             lines.push(Line::from(diff_preview(state.diff)));
             append_draft_preview(&mut lines, state.drafts);
@@ -378,7 +393,6 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
         "Pull request"
     };
     let detail = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
         .scroll((scroll as u16, 0))
         .style(panel_style())
         .block(panel_block(
@@ -418,7 +432,7 @@ fn render_ai_review_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_
         lines.push(Line::from("No AI review run for this pull request."));
         lines.push(Line::from(""));
     }
-    append_ai_review_output(&mut lines, state.ai_review_output);
+    append_ai_review_output(&mut lines, state.ai_review_output, content_width(area));
 
     let content_len = lines.len();
     let scroll = clamped_scroll(content_len, area.height, state.ai_review_scroll);
@@ -428,7 +442,6 @@ fn render_ai_review_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_
         "AI review"
     };
     let detail = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
         .scroll((scroll as u16, 0))
         .style(panel_style())
         .block(panel_block(
@@ -485,7 +498,7 @@ fn append_draft_preview(lines: &mut Vec<Line<'_>>, drafts: &[DraftComment]) {
     }
 }
 
-fn append_ai_review_output(lines: &mut Vec<Line<'_>>, output: Option<&str>) {
+fn append_ai_review_output(lines: &mut Vec<Line<'_>>, output: Option<&str>, width: usize) {
     let Some(output) = output.map(str::trim).filter(|output| !output.is_empty()) else {
         lines.push(Line::from(Span::styled(
             "No saved AI review output yet.",
@@ -495,11 +508,13 @@ fn append_ai_review_output(lines: &mut Vec<Line<'_>>, output: Option<&str>) {
     };
     lines.push(Line::from(Span::styled("Output:", accent_style())));
     for line in output.lines() {
-        lines.push(Line::from(style_review_line(line)));
+        for wrapped in wrap_plain_line(line, width) {
+            lines.push(Line::from(style_review_line(wrapped.as_str())));
+        }
     }
 }
 
-fn append_description_lines<'a>(lines: &mut Vec<Line<'a>>, description: &str) {
+fn append_description_lines<'a>(lines: &mut Vec<Line<'a>>, description: &str, width: usize) {
     let trimmed = description.trim();
     if trimmed.is_empty() {
         lines.push(Line::from(Span::styled("No description.", muted_style())));
@@ -507,7 +522,9 @@ fn append_description_lines<'a>(lines: &mut Vec<Line<'a>>, description: &str) {
     }
     lines.push(Line::from(Span::styled("Description:", accent_style())));
     for line in trimmed.lines() {
-        lines.push(Line::from(line.to_string()));
+        for wrapped in wrap_plain_line(line, width) {
+            lines.push(Line::from(wrapped));
+        }
     }
 }
 
@@ -553,10 +570,60 @@ fn render_scrollbar(frame: &mut Frame<'_>, area: Rect, content_len: usize, offse
     );
 }
 
+fn content_width(area: Rect) -> usize {
+    usize::from(area.width.saturating_sub(3)).max(8)
+}
+
 fn clamped_scroll(content_len: usize, area_height: u16, offset: usize) -> usize {
     let visible_rows = usize::from(area_height.saturating_sub(2)).max(1);
     let max_offset = content_len.saturating_sub(visible_rows);
     offset.min(max_offset).min(usize::from(u16::MAX))
+}
+
+fn wrap_plain_line(line: &str, width: usize) -> Vec<String> {
+    let width = width.max(8);
+    if line.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut rows = Vec::new();
+    let mut remaining = line.trim_end().to_string();
+    while remaining.chars().count() > width {
+        let split_at = preferred_wrap_index(remaining.as_str(), width);
+        let (head, tail) = split_at_char(remaining.as_str(), split_at);
+        rows.push(head.trim_end().to_string());
+        remaining = tail.trim_start().to_string();
+        if remaining.is_empty() {
+            break;
+        }
+    }
+    rows.push(remaining);
+    rows
+}
+
+fn preferred_wrap_index(line: &str, width: usize) -> usize {
+    let mut last_break = None;
+    for (index, character) in line.chars().enumerate() {
+        if index >= width {
+            break;
+        }
+        if character.is_whitespace() || matches!(character, '/' | '-' | ',' | '.') {
+            last_break = Some(index + 1);
+        }
+    }
+    last_break.unwrap_or(width)
+}
+
+fn split_at_char(line: &str, char_index: usize) -> (&str, &str) {
+    if char_index == 0 {
+        return ("", line);
+    }
+    let byte_index = line
+        .char_indices()
+        .nth(char_index)
+        .map(|(index, _)| index)
+        .unwrap_or_else(|| line.len());
+    line.split_at(cmp::min(byte_index, line.len()))
 }
 
 fn style_review_line(line: &str) -> Vec<Span<'static>> {
@@ -713,7 +780,7 @@ mod tests {
 
     #[test]
     fn renders_empty_repository_state() {
-        let backend = TestBackend::new(80, 20);
+        let backend = TestBackend::new(120, 20);
         let mut terminal = Terminal::new(backend).expect("terminal");
 
         terminal
@@ -728,6 +795,7 @@ mod tests {
                         selected_pr: 0,
                         detail: None,
                         comments: &[],
+                        ai_reviewed_pr_ids: &[],
                         diff: None,
                         drafts: &[],
                         composer: None,
@@ -750,7 +818,7 @@ mod tests {
 
     #[test]
     fn renders_selected_repository_detail() {
-        let backend = TestBackend::new(100, 24);
+        let backend = TestBackend::new(140, 24);
         let mut terminal = Terminal::new(backend).expect("terminal");
         let repos = vec![RepoRef {
             provider: ReviewProvider::Github,
@@ -785,6 +853,7 @@ mod tests {
                         selected_pr: 0,
                         detail: None,
                         comments: &[],
+                        ai_reviewed_pr_ids: &[],
                         diff: None,
                         drafts: &[],
                         composer: None,
@@ -807,8 +876,76 @@ mod tests {
     }
 
     #[test]
+    fn renders_ai_review_markers_in_pull_request_list() {
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let pull_requests = vec![
+            PullRequestSummary {
+                id: 12,
+                title: "Reviewed".to_string(),
+                author_display_name: String::new(),
+                author_account_id: None,
+                source_branch: "feature/reviewed".to_string(),
+                destination_branch: "main".to_string(),
+                state: "OPEN".to_string(),
+                draft: false,
+                comment_count: 0,
+                created_on: String::new(),
+                updated_on: String::new(),
+                reviewers: Vec::new(),
+            },
+            PullRequestSummary {
+                id: 13,
+                title: "Pending".to_string(),
+                author_display_name: String::new(),
+                author_account_id: None,
+                source_branch: "feature/pending".to_string(),
+                destination_branch: "main".to_string(),
+                state: "OPEN".to_string(),
+                draft: false,
+                comment_count: 0,
+                created_on: String::new(),
+                updated_on: String::new(),
+                reviewers: Vec::new(),
+            },
+        ];
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::PullRequests,
+                        pull_requests: &pull_requests,
+                        selected_pr: 0,
+                        detail: None,
+                        comments: &[],
+                        ai_reviewed_pr_ids: &[12],
+                        diff: None,
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::PullRequest,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
+                        error: None,
+                        status: "Ready",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("[AI] #12"));
+        assert!(text.contains("[--] #13"));
+    }
+
+    #[test]
     fn renders_loaded_pull_request_detail_and_diff_summary() {
-        let backend = TestBackend::new(100, 24);
+        let backend = TestBackend::new(140, 24);
         let mut terminal = Terminal::new(backend).expect("terminal");
         let detail = PullRequestDetail {
             id: 12,
@@ -848,6 +985,7 @@ mod tests {
                         selected_pr: 0,
                         detail: Some(&detail),
                         comments: &comments,
+                        ai_reviewed_pr_ids: &[],
                         diff: Some("diff --git a/a b/a\n+new\n-old\n"),
                         drafts: &[DraftComment {
                             id: 1,
@@ -890,6 +1028,7 @@ mod tests {
                         selected_pr: 0,
                         detail: None,
                         comments: &[],
+                        ai_reviewed_pr_ids: &[],
                         diff: None,
                         drafts: &[],
                         composer: Some("pending thought"),
@@ -963,6 +1102,7 @@ mod tests {
             selected_pr: 0,
             detail: None,
             comments: &[],
+            ai_reviewed_pr_ids: &[],
             diff: None,
             drafts: &[],
             composer: None,
@@ -1017,6 +1157,7 @@ mod tests {
                         selected_pr: 0,
                         detail: Some(&detail),
                         comments: &[],
+                        ai_reviewed_pr_ids: &[],
                         diff: Some("diff --git a/a b/a\n+new\n-old\n"),
                         drafts: &[],
                         composer: None,
@@ -1075,6 +1216,7 @@ mod tests {
                         selected_pr: 0,
                         detail: Some(&detail),
                         comments: &[],
+                        ai_reviewed_pr_ids: &[],
                         diff: Some("diff --git a/a b/a\n+new\n-old\n"),
                         drafts: &[],
                         composer: None,
@@ -1094,6 +1236,61 @@ mod tests {
         assert!(text.contains("Review in the terminal."));
         assert!(text.contains("Review output line 10"));
         assert!(!text.contains("Review output line 00"));
+    }
+
+    #[test]
+    fn scrolls_wrapped_ai_review_output_rows() {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let detail = PullRequestDetail {
+            id: 12,
+            title: "Add terminal UI".to_string(),
+            description_raw: "Review in the terminal.".to_string(),
+            state: "OPEN".to_string(),
+            draft: false,
+            author_display_name: "fdg".to_string(),
+            reviewers: Vec::new(),
+            source_branch: "feature/tui".to_string(),
+            destination_branch: "main".to_string(),
+            source_commit_hash: None,
+            destination_commit_hash: None,
+            created_on: String::new(),
+            updated_on: String::new(),
+        };
+        let output = format!("{}tail-marker", "wrapped review phrase ".repeat(80));
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::PullRequests,
+                        pull_requests: &[],
+                        selected_pr: 0,
+                        detail: Some(&detail),
+                        comments: &[],
+                        ai_reviewed_pr_ids: &[],
+                        diff: Some("diff --git a/a b/a\n+new\n-old\n"),
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: Some(&output),
+                        detail_view: DetailView::AiReview,
+                        detail_scroll: 0,
+                        ai_review_scroll: usize::MAX,
+                        error: None,
+                        status: "Loaded",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("Review in the terminal."));
+        assert!(text.contains("tail-marker"));
+        assert!(!text.contains("Output:"));
     }
 
     #[test]
@@ -1132,6 +1329,7 @@ mod tests {
                         selected_pr: 0,
                         detail: Some(&detail),
                         comments: &[],
+                        ai_reviewed_pr_ids: &[],
                         diff: None,
                         drafts: &[],
                         composer: None,

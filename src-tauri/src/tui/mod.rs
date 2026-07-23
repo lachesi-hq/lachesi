@@ -71,6 +71,7 @@ struct TuiApp {
     selected_pr: usize,
     detail: Option<PullRequestDetail>,
     comments: Vec<PrComment>,
+    ai_reviewed_pr_ids: Vec<u32>,
     diff: Option<String>,
     drafts: Vec<DraftComment>,
     composer: Option<String>,
@@ -113,6 +114,7 @@ impl TuiApp {
             selected_pr: 0,
             detail: None,
             comments: Vec::new(),
+            ai_reviewed_pr_ids: Vec::new(),
             diff: None,
             drafts: Vec::new(),
             composer: None,
@@ -286,6 +288,7 @@ impl TuiApp {
             self.pull_requests.clear();
             self.detail = None;
             self.comments.clear();
+            self.ai_reviewed_pr_ids.clear();
             self.diff = None;
             self.drafts.clear();
             self.composer = None;
@@ -323,6 +326,7 @@ impl TuiApp {
                 self.ai_review_output = None;
                 self.detail_view = DetailView::PullRequest;
                 self.reset_detail_scrolls();
+                self.refresh_ai_review_markers(workspace.as_str(), repo_name.as_str());
                 self.status = format!("Loaded {} open PRs", self.pull_requests.len());
                 if !self.pull_requests.is_empty() {
                     self.load_selected_pr();
@@ -332,6 +336,7 @@ impl TuiApp {
                 self.pull_requests.clear();
                 self.detail = None;
                 self.comments.clear();
+                self.ai_reviewed_pr_ids.clear();
                 self.diff = None;
                 self.drafts.clear();
                 self.composer = None;
@@ -666,7 +671,29 @@ impl TuiApp {
             self.ai_review_state.as_ref().map(|state| state.status),
             Some(AiReviewRunStatus::Succeeded)
         ) {
+            if let Some((_, _, pr_id)) = self.active_ai_target.as_ref() {
+                self.mark_ai_reviewed(*pr_id);
+            }
             self.refresh_ai_review_output();
+        }
+    }
+
+    fn refresh_ai_review_markers(&mut self, workspace: &str, repo: &str) {
+        self.ai_reviewed_pr_ids = self
+            .pull_requests
+            .iter()
+            .filter_map(
+                |pr| match load_ai_review_store_native(workspace, repo, pr.id) {
+                    Ok(Some(store)) if !store.review_runs.is_empty() => Some(pr.id),
+                    _ => None,
+                },
+            )
+            .collect();
+    }
+
+    fn mark_ai_reviewed(&mut self, pr_id: u32) {
+        if !self.ai_reviewed_pr_ids.contains(&pr_id) {
+            self.ai_reviewed_pr_ids.push(pr_id);
         }
     }
 
@@ -769,6 +796,7 @@ impl TuiApp {
             selected_pr: self.selected_pr,
             detail: self.detail.as_ref(),
             comments: &self.comments,
+            ai_reviewed_pr_ids: &self.ai_reviewed_pr_ids,
             diff: self.diff.as_deref(),
             drafts: &self.drafts,
             composer: self.composer.as_deref(),
