@@ -15,3 +15,4 @@ Append one row per commit. Newest at the bottom.
 | 2026-07-23 | `8def318` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Changed repository-owned prompts to replace the built-in AI review prompt. |
 | 2026-07-23 | `128166c` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Split PR and AI review panes, added scroll support, and introduced TUI accent styling. |
 | 2026-07-23 | `83fa971` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Added PR-list AI review markers, narrowed the repository pane, and made wrapped AI review output scroll vertically. |
+| 2026-07-23 | `458d2d3` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Added terminal PR-list running markers for active AI reviews and OSC52 clipboard copy for full saved review output. |

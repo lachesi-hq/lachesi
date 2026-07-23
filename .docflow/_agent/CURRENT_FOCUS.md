@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`83fa971` - refined terminal review reading with wrapped scrolling, AI review markers, and a narrower repository pane.
+`458d2d3` - terminal AI review running markers and full-output clipboard copy.
 
 ## Next item
 
