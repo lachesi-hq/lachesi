@@ -1,7 +1,10 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    prelude::{Frame, Line, Modifier, Span, Style},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    prelude::{Color, Frame, Line, Modifier, Span, Style},
+    widgets::{
+        Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
+    },
 };
 
 use crate::config::{RepoRef, ReviewProvider};
@@ -23,6 +26,8 @@ pub struct TuiState<'a> {
     pub ai_review: Option<&'a AiReviewRunState>,
     pub ai_review_output: Option<&'a str>,
     pub detail_view: DetailView,
+    pub detail_scroll: usize,
+    pub ai_review_scroll: usize,
     pub error: Option<&'a str>,
     pub status: &'a str,
 }
@@ -51,8 +56,19 @@ pub enum MouseTarget {
     PullRequest(usize),
 }
 
+const SURFACE: Color = Color::Rgb(13, 17, 23);
+const PANEL: Color = Color::Rgb(18, 24, 32);
+const BORDER: Color = Color::Rgb(82, 96, 112);
+const TEXT: Color = Color::Rgb(222, 228, 236);
+const MUTED: Color = Color::Rgb(136, 148, 164);
+const ACCENT: Color = Color::Rgb(255, 176, 64);
+const INFO: Color = Color::Rgb(94, 188, 255);
+const SUCCESS: Color = Color::Rgb(74, 222, 128);
+const ERROR: Color = Color::LightRed;
+
 pub fn render(frame: &mut Frame<'_>, state: TuiState<'_>) {
     let area = frame.area();
+    frame.render_widget(Block::default().style(base_style()), area);
     let [header, body, footer] = *vertical_areas().split(area) else {
         return;
     };
@@ -85,6 +101,28 @@ pub fn mouse_target(area: Rect, x: u16, y: u16, state: TuiState<'_>) -> Option<M
     list_index_at(pr_list, x, y, state.pull_requests.len()).map(MouseTarget::PullRequest)
 }
 
+pub fn detail_view_target(area: Rect, x: u16, y: u16) -> Option<DetailView> {
+    let [_, body, _] = *vertical_areas().split(area) else {
+        return None;
+    };
+    let [_, review] = *body_areas().split(body) else {
+        return None;
+    };
+    let [_, details] = *review_areas().split(review) else {
+        return None;
+    };
+    let [pull_request, ai_review] = *detail_areas().split(details) else {
+        return None;
+    };
+    if rect_contains(pull_request, x, y) {
+        Some(DetailView::PullRequest)
+    } else if rect_contains(ai_review, x, y) {
+        Some(DetailView::AiReview)
+    } else {
+        None
+    }
+}
+
 fn vertical_areas() -> Layout {
     Layout::default()
         .direction(Direction::Vertical)
@@ -107,6 +145,19 @@ fn review_areas() -> Layout {
         .constraints([Constraint::Percentage(34), Constraint::Percentage(66)])
 }
 
+fn detail_areas() -> Layout {
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+}
+
+fn rect_contains(area: Rect, x: u16, y: u16) -> bool {
+    x >= area.x
+        && x < area.x.saturating_add(area.width)
+        && y >= area.y
+        && y < area.y.saturating_add(area.height)
+}
+
 fn list_index_at(area: Rect, x: u16, y: u16, len: usize) -> Option<usize> {
     if len == 0 {
         return None;
@@ -122,10 +173,15 @@ fn list_index_at(area: Rect, x: u16, y: u16, len: usize) -> Option<usize> {
 
 fn render_header(frame: &mut Frame<'_>, area: Rect) {
     let header = Paragraph::new(Line::from(vec![
-        Span::styled("Lachesi", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" terminal review workspace"),
+        Span::styled("Lachesi", accent_style().add_modifier(Modifier::BOLD)),
+        Span::styled(" terminal review workspace", text_style()),
     ]))
-    .block(Block::default().borders(Borders::BOTTOM));
+    .style(base_style())
+    .block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(border_style()),
+    );
     frame.render_widget(header, area);
 }
 
@@ -138,17 +194,28 @@ fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
             .iter()
             .enumerate()
             .map(|(index, repo)| {
-                let marker = if index == state.selected_repo {
-                    ">"
-                } else {
-                    " "
-                };
-                ListItem::new(format!(
-                    "{marker} {} {}/{}",
-                    provider_label(repo.provider),
-                    repo.workspace,
-                    repo.repo
-                ))
+                let selected = index == state.selected_repo;
+                let marker = if selected { ">" } else { " " };
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        marker,
+                        if selected {
+                            accent_style()
+                        } else {
+                            muted_style()
+                        },
+                    ),
+                    Span::raw(" "),
+                    Span::styled(provider_label(repo.provider), provider_style(repo.provider)),
+                    Span::styled(
+                        format!(" {}/{}", repo.workspace, repo.repo),
+                        if selected {
+                            text_style().add_modifier(Modifier::BOLD)
+                        } else {
+                            text_style()
+                        },
+                    ),
+                ]))
             })
             .collect()
     };
@@ -157,7 +224,9 @@ fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     } else {
         "Repositories"
     };
-    let list = List::new(items).block(Block::default().title(title).borders(Borders::ALL));
+    let list = List::new(items)
+        .style(panel_style())
+        .block(panel_block(title, state.focus == FocusPane::Repositories));
     frame.render_widget(list, area);
 }
 
@@ -178,11 +247,32 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
             .iter()
             .enumerate()
             .map(|(index, pr)| {
-                let marker = if index == state.selected_pr { ">" } else { " " };
-                ListItem::new(format!(
-                    "{marker} #{} {} -> {}  {}",
-                    pr.id, pr.source_branch, pr.destination_branch, pr.title
-                ))
+                let selected = index == state.selected_pr;
+                let marker = if selected { ">" } else { " " };
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        marker,
+                        if selected {
+                            accent_style()
+                        } else {
+                            muted_style()
+                        },
+                    ),
+                    Span::raw(" "),
+                    Span::styled(format!("#{} ", pr.id), info_style()),
+                    Span::styled(pr.source_branch.clone(), branch_style()),
+                    Span::styled(" -> ", muted_style()),
+                    Span::styled(pr.destination_branch.clone(), branch_style()),
+                    Span::styled("  ", text_style()),
+                    Span::styled(
+                        pr.title.clone(),
+                        if selected {
+                            text_style().add_modifier(Modifier::BOLD)
+                        } else {
+                            text_style()
+                        },
+                    ),
+                ]))
             })
             .collect()
     };
@@ -191,17 +281,27 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
     } else {
         "Pull requests"
     };
-    let list = List::new(items).block(Block::default().title(title).borders(Borders::ALL));
+    let list = List::new(items)
+        .style(panel_style())
+        .block(panel_block(title, state.focus == FocusPane::PullRequests));
     frame.render_widget(list, area);
 }
 
 fn render_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
+    let [pull_request, ai_review] = *detail_areas().split(area) else {
+        return;
+    };
+    render_pull_request_detail(frame, pull_request, state);
+    render_ai_review_detail(frame, ai_review, state);
+}
+
+fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     let mut lines = Vec::new();
 
     if let Some(error) = state.error {
         lines.push(Line::from(vec![
-            Span::styled("Error: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(error),
+            Span::styled("Error: ", error_style().add_modifier(Modifier::BOLD)),
+            Span::styled(error, error_style()),
         ]));
         lines.push(Line::from(""));
     }
@@ -211,76 +311,53 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("#{} ", detail.id),
-                    Style::default().add_modifier(Modifier::BOLD),
+                    info_style().add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(detail.title.as_str()),
+                Span::styled(
+                    detail.title.as_str(),
+                    text_style().add_modifier(Modifier::BOLD),
+                ),
             ]));
-            lines.push(Line::from(format!(
-                "{} -> {} | {} | {} comments",
-                detail.source_branch,
-                detail.destination_branch,
-                detail.state,
-                state.comments.len()
-            )));
-            lines.push(Line::from(format!(
-                "Drafts: {} pending",
-                state.drafts.len()
-            )));
-            if let Some(ai_review) = state.ai_review {
-                lines.push(Line::from(format!(
-                    "AI review: {}{}",
-                    ai_review_status_label(ai_review.status),
-                    ai_review
-                        .error
-                        .as_deref()
-                        .map(|error| format!(" ({error})"))
-                        .unwrap_or_default()
-                )));
-                if let Some(log) = ai_review.logs.last() {
-                    lines.push(Line::from(format!("AI log: {log}")));
-                }
-            }
+            lines.push(Line::from(vec![
+                Span::styled(detail.source_branch.as_str(), branch_style()),
+                Span::styled(" -> ", muted_style()),
+                Span::styled(detail.destination_branch.as_str(), branch_style()),
+                Span::styled(" | ", muted_style()),
+                Span::styled(detail.state.as_str(), status_style(detail.state.as_str())),
+                Span::styled(" | ", muted_style()),
+                Span::styled(format!("{} comments", state.comments.len()), text_style()),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("Drafts: ", muted_style()),
+                Span::styled(format!("{} pending", state.drafts.len()), text_style()),
+            ]));
             lines.push(Line::from(""));
-            match state.detail_view {
-                DetailView::PullRequest => {
-                    lines.push(Line::from(description_preview(
-                        detail.description_raw.as_str(),
-                    )));
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(diff_preview(state.diff)));
-                }
-                DetailView::AiReview => append_ai_review_output(&mut lines, state.ai_review_output),
-            }
+            append_description_lines(&mut lines, detail.description_raw.as_str());
+            lines.push(Line::from(""));
+            lines.push(Line::from(diff_preview(state.diff)));
             append_draft_preview(&mut lines, state.drafts);
         }
         None => match state.repos.get(state.selected_repo) {
             Some(repo) => {
                 lines.push(Line::from(vec![
-                    Span::styled("Provider: ", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::raw(provider_label(repo.provider)),
+                    Span::styled("Provider: ", accent_style().add_modifier(Modifier::BOLD)),
+                    Span::styled(provider_label(repo.provider), provider_style(repo.provider)),
                 ]));
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        "Repository: ",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(format!("{}/{}", repo.workspace, repo.repo)),
+                    Span::styled("Repository: ", accent_style().add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("{}/{}", repo.workspace, repo.repo), text_style()),
                 ]));
                 lines.push(Line::from(vec![
+                    Span::styled("Local path: ", accent_style().add_modifier(Modifier::BOLD)),
                     Span::styled(
-                        "Local path: ",
-                        Style::default().add_modifier(Modifier::BOLD),
+                        repo.local_path.as_deref().unwrap_or("not configured"),
+                        text_style(),
                     ),
-                    Span::raw(repo.local_path.as_deref().unwrap_or("not configured")),
                 ]));
             }
             None => {
-                lines.push(Line::from(
-                    "Configure repositories in Lachesi settings first.",
-                ));
-                lines.push(Line::from(
-                    "This TUI reads the same non-secret settings file as the desktop app.",
-                ));
+                lines.push(Line::from("Configure repos in Lachesi settings."));
+                lines.push(Line::from("TUI uses the desktop app settings file."));
             }
         },
     }
@@ -288,32 +365,109 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     if let Some(composer) = state.composer {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
-            Span::styled("Draft: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(composer),
+            Span::styled("Draft: ", accent_style().add_modifier(Modifier::BOLD)),
+            Span::styled(composer, text_style()),
         ]));
     }
 
+    let content_len = lines.len();
+    let scroll = clamped_scroll(content_len, area.height, state.detail_scroll);
+    let title = if state.detail_view == DetailView::PullRequest {
+        "Pull request *"
+    } else {
+        "Pull request"
+    };
     let detail = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
-        .block(Block::default().title("Review").borders(Borders::ALL));
+        .scroll((scroll as u16, 0))
+        .style(panel_style())
+        .block(panel_block(
+            title,
+            state.detail_view == DetailView::PullRequest,
+        ));
     frame.render_widget(detail, area);
+    render_scrollbar(frame, area, content_len, scroll);
+}
+
+fn render_ai_review_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
+    let mut lines = Vec::new();
+    if let Some(ai_review) = state.ai_review {
+        lines.push(Line::from(vec![
+            Span::styled("Status: ", muted_style()),
+            Span::styled(
+                ai_review_status_label(ai_review.status),
+                ai_review_status_style(ai_review.status),
+            ),
+            Span::styled(
+                ai_review
+                    .error
+                    .as_deref()
+                    .map(|error| format!(" ({error})"))
+                    .unwrap_or_default(),
+                error_style(),
+            ),
+        ]));
+        if let Some(log) = ai_review.logs.last() {
+            lines.push(Line::from(vec![
+                Span::styled("Log: ", muted_style()),
+                Span::styled(log.clone(), text_style()),
+            ]));
+        }
+        lines.push(Line::from(""));
+    } else {
+        lines.push(Line::from("No AI review run for this pull request."));
+        lines.push(Line::from(""));
+    }
+    append_ai_review_output(&mut lines, state.ai_review_output);
+
+    let content_len = lines.len();
+    let scroll = clamped_scroll(content_len, area.height, state.ai_review_scroll);
+    let title = if state.detail_view == DetailView::AiReview {
+        "AI review *"
+    } else {
+        "AI review"
+    };
+    let detail = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll as u16, 0))
+        .style(panel_style())
+        .block(panel_block(
+            title,
+            state.detail_view == DetailView::AiReview,
+        ));
+    frame.render_widget(detail, area);
+    render_scrollbar(frame, area, content_len, scroll);
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
     let footer = Paragraph::new(Line::from(vec![
-        Span::raw("q quit  "),
-        Span::raw("tab focus  "),
-        Span::raw("j/k select  "),
-        Span::raw("enter load  "),
-        Span::raw("c draft  "),
-        Span::raw("p publish  "),
-        Span::raw("x discard  "),
-        Span::raw("a ai review  "),
-        Span::raw("v view  "),
-        Span::raw("g lazygit  "),
-        Span::raw("r refresh  "),
-        Span::raw(status),
-    ]));
+        Span::styled("q", accent_style()),
+        Span::styled(" quit  ", muted_style()),
+        Span::styled("tab", accent_style()),
+        Span::styled(" focus  ", muted_style()),
+        Span::styled("j/k", accent_style()),
+        Span::styled(" select  ", muted_style()),
+        Span::styled("enter", accent_style()),
+        Span::styled(" load  ", muted_style()),
+        Span::styled("c", accent_style()),
+        Span::styled(" draft  ", muted_style()),
+        Span::styled("p", accent_style()),
+        Span::styled(" publish  ", muted_style()),
+        Span::styled("x", accent_style()),
+        Span::styled(" discard  ", muted_style()),
+        Span::styled("a", accent_style()),
+        Span::styled(" ai review  ", muted_style()),
+        Span::styled("v", accent_style()),
+        Span::styled(" pane  ", muted_style()),
+        Span::styled("PgUp/PgDn", accent_style()),
+        Span::styled(" scroll  ", muted_style()),
+        Span::styled("g", accent_style()),
+        Span::styled(" lazygit  ", muted_style()),
+        Span::styled("r", accent_style()),
+        Span::styled(" refresh  ", muted_style()),
+        Span::styled(status, info_style()),
+    ]))
+    .style(base_style());
     frame.render_widget(footer, area);
 }
 
@@ -322,23 +476,37 @@ fn append_draft_preview(lines: &mut Vec<Line<'_>>, drafts: &[DraftComment]) {
         return;
     }
     lines.push(Line::from(""));
-    lines.push(Line::from("Pending drafts:"));
+    lines.push(Line::from(Span::styled("Pending drafts:", accent_style())));
     for draft in drafts.iter().take(3) {
-        lines.push(Line::from(format!(
-            "- #{} {}",
-            draft.id,
-            description_preview(draft.raw.as_str())
-        )));
+        lines.push(Line::from(vec![
+            Span::styled(format!("- #{} ", draft.id), info_style()),
+            Span::styled(description_preview(draft.raw.as_str()), text_style()),
+        ]));
     }
 }
 
 fn append_ai_review_output(lines: &mut Vec<Line<'_>>, output: Option<&str>) {
     let Some(output) = output.map(str::trim).filter(|output| !output.is_empty()) else {
-        lines.push(Line::from("No saved AI review output yet."));
+        lines.push(Line::from(Span::styled(
+            "No saved AI review output yet.",
+            muted_style(),
+        )));
         return;
     };
-    lines.push(Line::from("AI review output:"));
-    for line in output.lines().take(18) {
+    lines.push(Line::from(Span::styled("Output:", accent_style())));
+    for line in output.lines() {
+        lines.push(Line::from(style_review_line(line)));
+    }
+}
+
+fn append_description_lines<'a>(lines: &mut Vec<Line<'a>>, description: &str) {
+    let trimmed = description.trim();
+    if trimmed.is_empty() {
+        lines.push(Line::from(Span::styled("No description.", muted_style())));
+        return;
+    }
+    lines.push(Line::from(Span::styled("Description:", accent_style())));
+    for line in trimmed.lines() {
         lines.push(Line::from(line.to_string()));
     }
 }
@@ -368,6 +536,146 @@ fn diff_preview(diff: Option<&str>) -> String {
         .filter(|line| line.starts_with('-') && !line.starts_with("---"))
         .count();
     format!("Diff: {files} files, +{additions}/-{deletions}")
+}
+
+fn render_scrollbar(frame: &mut Frame<'_>, area: Rect, content_len: usize, offset: usize) {
+    let inner_height = usize::from(area.height.saturating_sub(2));
+    if content_len <= inner_height.max(1) {
+        return;
+    }
+    let mut scrollbar_state = ScrollbarState::new(content_len).position(offset);
+    frame.render_stateful_widget(
+        Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(ACCENT).bg(PANEL)),
+        area,
+        &mut scrollbar_state,
+    );
+}
+
+fn clamped_scroll(content_len: usize, area_height: u16, offset: usize) -> usize {
+    let visible_rows = usize::from(area_height.saturating_sub(2)).max(1);
+    let max_offset = content_len.saturating_sub(visible_rows);
+    offset.min(max_offset).min(usize::from(u16::MAX))
+}
+
+fn style_review_line(line: &str) -> Vec<Span<'static>> {
+    if line.starts_with("**[Critical]**") || line.starts_with("**[CRITICAL]**") {
+        return vec![Span::styled(
+            line.to_string(),
+            error_style().add_modifier(Modifier::BOLD),
+        )];
+    }
+    if line.starts_with("**[Major]**") || line.starts_with("**[MAJOR]**") {
+        return vec![Span::styled(
+            line.to_string(),
+            accent_style().add_modifier(Modifier::BOLD),
+        )];
+    }
+    if line.starts_with("**[Minor]**") || line.starts_with("**[MINOR]**") {
+        return vec![Span::styled(
+            line.to_string(),
+            info_style().add_modifier(Modifier::BOLD),
+        )];
+    }
+    if line.starts_with("**[Nit]**") || line.starts_with("**[NIT]**") {
+        return vec![Span::styled(line.to_string(), muted_style())];
+    }
+    if line.starts_with("Fix:") {
+        return vec![
+            Span::styled("Fix:", success_style().add_modifier(Modifier::BOLD)),
+            Span::styled(line.trim_start_matches("Fix:").to_string(), text_style()),
+        ];
+    }
+    if line.starts_with('#') {
+        return vec![Span::styled(
+            line.to_string(),
+            info_style().add_modifier(Modifier::BOLD),
+        )];
+    }
+    vec![Span::styled(line.to_string(), text_style())]
+}
+
+fn panel_block(title: &'static str, active: bool) -> Block<'static> {
+    let title_style = if active {
+        accent_style().add_modifier(Modifier::BOLD)
+    } else {
+        muted_style()
+    };
+    Block::default()
+        .title(Line::from(Span::styled(title, title_style)))
+        .borders(Borders::ALL)
+        .border_style(if active {
+            accent_style()
+        } else {
+            border_style()
+        })
+        .style(panel_style())
+}
+
+fn base_style() -> Style {
+    Style::default().fg(TEXT).bg(SURFACE)
+}
+
+fn panel_style() -> Style {
+    Style::default().fg(TEXT).bg(PANEL)
+}
+
+fn border_style() -> Style {
+    Style::default().fg(BORDER).bg(SURFACE)
+}
+
+fn accent_style() -> Style {
+    Style::default().fg(ACCENT).bg(SURFACE)
+}
+
+fn muted_style() -> Style {
+    Style::default().fg(MUTED).bg(SURFACE)
+}
+
+fn text_style() -> Style {
+    Style::default().fg(TEXT).bg(SURFACE)
+}
+
+fn info_style() -> Style {
+    Style::default().fg(INFO).bg(SURFACE)
+}
+
+fn success_style() -> Style {
+    Style::default().fg(SUCCESS).bg(SURFACE)
+}
+
+fn error_style() -> Style {
+    Style::default().fg(ERROR).bg(SURFACE)
+}
+
+fn branch_style() -> Style {
+    Style::default().fg(INFO).bg(SURFACE)
+}
+
+fn provider_style(provider: ReviewProvider) -> Style {
+    match provider {
+        ReviewProvider::Bitbucket => accent_style(),
+        ReviewProvider::Github => success_style(),
+    }
+}
+
+fn status_style(status: &str) -> Style {
+    match status {
+        "OPEN" => success_style(),
+        "MERGED" => info_style(),
+        "DECLINED" | "SUPERSEDED" => error_style(),
+        _ => text_style(),
+    }
+}
+
+fn ai_review_status_style(status: AiReviewRunStatus) -> Style {
+    match status {
+        AiReviewRunStatus::Succeeded => success_style(),
+        AiReviewRunStatus::Failed | AiReviewRunStatus::Cancelled => error_style(),
+        AiReviewRunStatus::Running => accent_style(),
+        AiReviewRunStatus::Idle => muted_style(),
+    }
 }
 
 fn provider_label(provider: ReviewProvider) -> &'static str {
@@ -426,6 +734,8 @@ mod tests {
                         ai_review: None,
                         ai_review_output: None,
                         detail_view: DetailView::PullRequest,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
                         error: None,
                         status: "Ready",
                     },
@@ -435,7 +745,7 @@ mod tests {
 
         let text = buffer_text(&terminal);
         assert!(text.contains("No repositories configured"));
-        assert!(text.contains("Configure repositories"));
+        assert!(text.contains("Configure repos"));
     }
 
     #[test]
@@ -481,6 +791,8 @@ mod tests {
                         ai_review: None,
                         ai_review_output: None,
                         detail_view: DetailView::PullRequest,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
                         error: None,
                         status: "Ready",
                     },
@@ -545,6 +857,8 @@ mod tests {
                         ai_review: None,
                         ai_review_output: None,
                         detail_view: DetailView::PullRequest,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -582,6 +896,8 @@ mod tests {
                         ai_review: None,
                         ai_review_output: None,
                         detail_view: DetailView::PullRequest,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
                         error: None,
                         status: "Composing",
                     },
@@ -653,6 +969,8 @@ mod tests {
             ai_review: None,
             ai_review_output: None,
             detail_view: DetailView::PullRequest,
+            detail_scroll: 0,
+            ai_review_scroll: 0,
             error: None,
             status: "Ready",
         };
@@ -705,6 +1023,8 @@ mod tests {
                         ai_review: None,
                         ai_review_output: Some("## Summary\nReview result body."),
                         detail_view: DetailView::AiReview,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -713,8 +1033,121 @@ mod tests {
             .expect("draw");
 
         let text = buffer_text(&terminal);
-        assert!(text.contains("AI review output"));
+        assert!(text.contains("AI review"));
         assert!(text.contains("Review result body"));
-        assert!(!text.contains("Diff: 1 files"));
+        assert!(text.contains("Review in the terminal."));
+        assert!(text.contains("Diff: 1 files"));
+    }
+
+    #[test]
+    fn scrolls_ai_review_output_without_hiding_pull_request_detail() {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let detail = PullRequestDetail {
+            id: 12,
+            title: "Add terminal UI".to_string(),
+            description_raw: "Review in the terminal.".to_string(),
+            state: "OPEN".to_string(),
+            draft: false,
+            author_display_name: "fdg".to_string(),
+            reviewers: Vec::new(),
+            source_branch: "feature/tui".to_string(),
+            destination_branch: "main".to_string(),
+            source_commit_hash: None,
+            destination_commit_hash: None,
+            created_on: String::new(),
+            updated_on: String::new(),
+        };
+        let output = (0..32)
+            .map(|index| format!("Review output line {index:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::PullRequests,
+                        pull_requests: &[],
+                        selected_pr: 0,
+                        detail: Some(&detail),
+                        comments: &[],
+                        diff: Some("diff --git a/a b/a\n+new\n-old\n"),
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: Some(&output),
+                        detail_view: DetailView::AiReview,
+                        detail_scroll: 0,
+                        ai_review_scroll: 10,
+                        error: None,
+                        status: "Loaded",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("Review in the terminal."));
+        assert!(text.contains("Review output line 10"));
+        assert!(!text.contains("Review output line 00"));
+    }
+
+    #[test]
+    fn clamps_large_ai_review_scroll_offsets() {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let detail = PullRequestDetail {
+            id: 12,
+            title: "Add terminal UI".to_string(),
+            description_raw: "Review in the terminal.".to_string(),
+            state: "OPEN".to_string(),
+            draft: false,
+            author_display_name: "fdg".to_string(),
+            reviewers: Vec::new(),
+            source_branch: "feature/tui".to_string(),
+            destination_branch: "main".to_string(),
+            source_commit_hash: None,
+            destination_commit_hash: None,
+            created_on: String::new(),
+            updated_on: String::new(),
+        };
+        let output = (0..20)
+            .map(|index| format!("Review output line {index:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::PullRequests,
+                        pull_requests: &[],
+                        selected_pr: 0,
+                        detail: Some(&detail),
+                        comments: &[],
+                        diff: None,
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: Some(&output),
+                        detail_view: DetailView::AiReview,
+                        detail_scroll: usize::MAX,
+                        ai_review_scroll: usize::MAX,
+                        error: None,
+                        status: "Loaded",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("Review output line 18"));
     }
 }

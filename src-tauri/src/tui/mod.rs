@@ -16,7 +16,10 @@ use crate::services::review::{
     get_ai_review_run_state_native, load_ai_review_store_native, start_inline_review_native,
     AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
 };
-use render::{mouse_target, render, DetailView, DraftComment, FocusPane, MouseTarget, TuiState};
+use render::{
+    detail_view_target, mouse_target, render, DetailView, DraftComment, FocusPane, MouseTarget,
+    TuiState,
+};
 use terminal::TerminalGuard;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -82,6 +85,8 @@ struct TuiApp {
     ai_review_state: Option<AiReviewRunState>,
     ai_review_output: Option<String>,
     detail_view: DetailView,
+    detail_scroll: usize,
+    ai_review_scroll: usize,
     error: Option<String>,
     status: String,
     should_quit: bool,
@@ -122,6 +127,8 @@ impl TuiApp {
             ai_review_state: None,
             ai_review_output: None,
             detail_view: DetailView::PullRequest,
+            detail_scroll: 0,
+            ai_review_scroll: 0,
             error: None,
             status: "Ready".to_string(),
             should_quit: false,
@@ -143,6 +150,9 @@ impl TuiApp {
             KeyCode::Char('a') => self.start_ai_review(),
             KeyCode::Char('v') => self.toggle_detail_view(),
             KeyCode::Char('r') => self.load_selected_repo(),
+            KeyCode::PageUp => self.scroll_active_detail(-10),
+            KeyCode::PageDown => self.scroll_active_detail(10),
+            KeyCode::Home => self.reset_active_detail_scroll(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
             _ => {}
@@ -153,13 +163,25 @@ impl TuiApp {
         if self.composer.is_some() {
             return;
         }
-        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-            return;
-        }
-        match mouse_target(area, mouse.column, mouse.row, self.view_state()) {
-            Some(MouseTarget::Repository(index)) => self.select_repo(index),
-            Some(MouseTarget::PullRequest(index)) => self.select_pr(index),
-            None => {}
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.scroll_detail_at(area, mouse.column, mouse.row, -3);
+            }
+            MouseEventKind::ScrollDown => {
+                self.scroll_detail_at(area, mouse.column, mouse.row, 3);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                match mouse_target(area, mouse.column, mouse.row, self.view_state()) {
+                    Some(MouseTarget::Repository(index)) => self.select_repo(index),
+                    Some(MouseTarget::PullRequest(index)) => self.select_pr(index),
+                    None => {
+                        if let Some(view) = detail_view_target(area, mouse.column, mouse.row) {
+                            self.detail_view = view;
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -254,7 +276,9 @@ impl TuiApp {
         }
         self.focus = FocusPane::PullRequests;
         self.selected_pr = index;
-        self.load_selected_pr();
+        if let Some(pr) = self.pull_requests.get(index) {
+            self.status = format!("Selected PR #{}; press enter to load", pr.id);
+        }
     }
 
     fn load_selected_repo(&mut self) {
@@ -298,6 +322,7 @@ impl TuiApp {
                 self.ai_review_state = None;
                 self.ai_review_output = None;
                 self.detail_view = DetailView::PullRequest;
+                self.reset_detail_scrolls();
                 self.status = format!("Loaded {} open PRs", self.pull_requests.len());
                 if !self.pull_requests.is_empty() {
                     self.load_selected_pr();
@@ -314,6 +339,7 @@ impl TuiApp {
                 self.ai_review_state = None;
                 self.ai_review_output = None;
                 self.detail_view = DetailView::PullRequest;
+                self.reset_detail_scrolls();
                 self.error = Some(error);
                 self.status = "Failed to load PRs".to_string();
             }
@@ -372,6 +398,7 @@ impl TuiApp {
                 self.refresh_ai_review_state();
                 self.refresh_ai_review_output();
                 self.detail_view = DetailView::PullRequest;
+                self.reset_detail_scrolls();
                 self.status = format!("Loaded PR #{pr_id}");
             }
             Err(error) => {
@@ -384,6 +411,7 @@ impl TuiApp {
                 self.ai_review_state = None;
                 self.ai_review_output = None;
                 self.detail_view = DetailView::PullRequest;
+                self.reset_detail_scrolls();
                 self.error = Some(error);
                 self.status = "Failed to load PR detail".to_string();
             }
@@ -508,6 +536,7 @@ impl TuiApp {
                 self.ai_review_state = Some(state);
                 self.ai_review_output = None;
                 self.detail_view = DetailView::AiReview;
+                self.ai_review_scroll = 0;
                 self.error = None;
                 self.status = format!("Started {} AI review", ai_provider_label(self.ai_provider));
             }
@@ -529,6 +558,45 @@ impl TuiApp {
         } else {
             self.status = "Showing pull request detail".to_string();
         }
+    }
+
+    fn scroll_active_detail(&mut self, delta: isize) {
+        match self.detail_view {
+            DetailView::PullRequest => {
+                self.detail_scroll = self.detail_scroll.saturating_add_signed(delta);
+                self.status = "Scrolled pull request detail".to_string();
+            }
+            DetailView::AiReview => {
+                self.ai_review_scroll = self.ai_review_scroll.saturating_add_signed(delta);
+                self.status = "Scrolled AI review output".to_string();
+            }
+        }
+    }
+
+    fn scroll_detail_at(&mut self, area: ratatui::layout::Rect, x: u16, y: u16, delta: isize) {
+        let Some(view) = detail_view_target(area, x, y) else {
+            return;
+        };
+        self.detail_view = view;
+        self.scroll_active_detail(delta);
+    }
+
+    fn reset_active_detail_scroll(&mut self) {
+        match self.detail_view {
+            DetailView::PullRequest => {
+                self.detail_scroll = 0;
+                self.status = "Reset pull request detail scroll".to_string();
+            }
+            DetailView::AiReview => {
+                self.ai_review_scroll = 0;
+                self.status = "Reset AI review scroll".to_string();
+            }
+        }
+    }
+
+    fn reset_detail_scrolls(&mut self) {
+        self.detail_scroll = 0;
+        self.ai_review_scroll = 0;
     }
 
     fn review_prompt_for_selected_repo(&self) -> Result<String, String> {
@@ -707,6 +775,8 @@ impl TuiApp {
             ai_review: self.ai_review_state.as_ref(),
             ai_review_output: self.ai_review_output.as_deref(),
             detail_view: self.detail_view,
+            detail_scroll: self.detail_scroll,
+            ai_review_scroll: self.ai_review_scroll,
             error: self.error.as_deref(),
             status: self.status.as_str(),
         }
@@ -840,6 +910,35 @@ mod tests {
 
         assert_eq!(app.focus, FocusPane::PullRequests);
         assert_eq!(app.selected_pr, 1);
+    }
+
+    #[test]
+    fn mouse_wheel_scrolls_only_detail_panes() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.detail_view = DetailView::AiReview;
+
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 2,
+                row: 5,
+                modifiers: event::KeyModifiers::empty(),
+            },
+            ratatui::layout::Rect::new(0, 0, 100, 24),
+        );
+        assert_eq!(app.ai_review_scroll, 0);
+
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 70,
+                row: 15,
+                modifiers: event::KeyModifiers::empty(),
+            },
+            ratatui::layout::Rect::new(0, 0, 100, 24),
+        );
+        assert_eq!(app.detail_view, DetailView::AiReview);
+        assert_eq!(app.ai_review_scroll, 3);
     }
 
     #[test]
