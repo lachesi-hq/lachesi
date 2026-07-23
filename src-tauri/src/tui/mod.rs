@@ -6,7 +6,11 @@ use std::time::Duration;
 use crossterm::event::{self, Event, KeyCode};
 
 use crate::config::{self, RepoRef};
-use render::{render, TuiState};
+use crate::services::bitbucket::{
+    get_pr_diff_native, get_pull_request_native, list_comments_native, list_pull_requests_native,
+    ListPrOptions, PrComment, PullRequestDetail, PullRequestSummary,
+};
+use render::{render, FocusPane, TuiState};
 use terminal::TerminalGuard;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -14,6 +18,7 @@ const TICK_RATE: Duration = Duration::from_millis(250);
 pub fn run_from_env() -> Result<(), String> {
     let config = config::load();
     let mut app = TuiApp::from_repos(config.repos);
+    app.load_selected_repo();
     let mut terminal = TerminalGuard::enter().map_err(|error| error.to_string())?;
 
     loop {
@@ -37,10 +42,17 @@ pub fn run_from_env() -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Clone)]
 struct TuiApp {
     repos: Vec<RepoRef>,
     selected_repo: usize,
+    focus: FocusPane,
+    pull_requests: Vec<PullRequestSummary>,
+    selected_pr: usize,
+    detail: Option<PullRequestDetail>,
+    comments: Vec<PrComment>,
+    diff: Option<String>,
+    error: Option<String>,
+    status: String,
     should_quit: bool,
 }
 
@@ -49,6 +61,14 @@ impl TuiApp {
         Self {
             repos,
             selected_repo: 0,
+            focus: FocusPane::Repositories,
+            pull_requests: Vec::new(),
+            selected_pr: 0,
+            detail: None,
+            comments: Vec::new(),
+            diff: None,
+            error: None,
+            status: "Ready".to_string(),
             should_quit: false,
         }
     }
@@ -56,9 +76,33 @@ impl TuiApp {
     fn handle_key(&mut self, code: KeyCode) {
         match code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
-            KeyCode::Down | KeyCode::Char('j') => self.select_next_repo(),
-            KeyCode::Up | KeyCode::Char('k') => self.select_previous_repo(),
+            KeyCode::Tab => self.toggle_focus(),
+            KeyCode::Enter => self.load_selected_pr(),
+            KeyCode::Char('r') => self.load_selected_repo(),
+            KeyCode::Down | KeyCode::Char('j') => self.select_next(),
+            KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
             _ => {}
+        }
+    }
+
+    fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            FocusPane::Repositories => FocusPane::PullRequests,
+            FocusPane::PullRequests => FocusPane::Repositories,
+        };
+    }
+
+    fn select_next(&mut self) {
+        match self.focus {
+            FocusPane::Repositories => self.select_next_repo(),
+            FocusPane::PullRequests => self.select_next_pr(),
+        }
+    }
+
+    fn select_previous(&mut self) {
+        match self.focus {
+            FocusPane::Repositories => self.select_previous_repo(),
+            FocusPane::PullRequests => self.select_previous_pr(),
         }
     }
 
@@ -67,18 +111,150 @@ impl TuiApp {
             self.selected_repo = 0;
             return;
         }
+        let previous = self.selected_repo;
         self.selected_repo = (self.selected_repo + 1).min(self.repos.len() - 1);
+        if self.selected_repo != previous {
+            self.load_selected_repo();
+        }
     }
 
     fn select_previous_repo(&mut self) {
+        let previous = self.selected_repo;
         self.selected_repo = self.selected_repo.saturating_sub(1);
+        if self.selected_repo != previous {
+            self.load_selected_repo();
+        }
+    }
+
+    fn select_next_pr(&mut self) {
+        if self.pull_requests.is_empty() {
+            self.selected_pr = 0;
+            return;
+        }
+        self.selected_pr = (self.selected_pr + 1).min(self.pull_requests.len() - 1);
+    }
+
+    fn select_previous_pr(&mut self) {
+        self.selected_pr = self.selected_pr.saturating_sub(1);
+    }
+
+    fn load_selected_repo(&mut self) {
+        let Some(repo) = self.repos.get(self.selected_repo) else {
+            self.pull_requests.clear();
+            self.detail = None;
+            self.comments.clear();
+            self.diff = None;
+            self.status = "No repositories configured".to_string();
+            return;
+        };
+        let provider = repo.provider;
+        let workspace = repo.workspace.clone();
+        let repo_name = repo.repo.clone();
+        self.status = format!("Loading open PRs for {workspace}/{repo_name}...");
+        self.error = None;
+        let opts = ListPrOptions {
+            state: Some("OPEN".to_string()),
+            page: Some(1),
+            pagelen: Some(50),
+            query: None,
+            updated_after: None,
+        };
+        match list_pull_requests_native(
+            Some(provider),
+            workspace.as_str(),
+            repo_name.as_str(),
+            &opts,
+        ) {
+            Ok(page) => {
+                self.pull_requests = page.values;
+                self.selected_pr = 0;
+                self.detail = None;
+                self.comments.clear();
+                self.diff = None;
+                self.status = format!("Loaded {} open PRs", self.pull_requests.len());
+                if !self.pull_requests.is_empty() {
+                    self.load_selected_pr();
+                }
+            }
+            Err(error) => {
+                self.pull_requests.clear();
+                self.detail = None;
+                self.comments.clear();
+                self.diff = None;
+                self.error = Some(error);
+                self.status = "Failed to load PRs".to_string();
+            }
+        }
+    }
+
+    fn load_selected_pr(&mut self) {
+        let Some(repo) = self.repos.get(self.selected_repo) else {
+            return;
+        };
+        let Some(pr) = self.pull_requests.get(self.selected_pr) else {
+            self.detail = None;
+            self.comments.clear();
+            self.diff = None;
+            return;
+        };
+        let provider = repo.provider;
+        let workspace = repo.workspace.clone();
+        let repo_name = repo.repo.clone();
+        let pr_id = pr.id;
+        self.status = format!("Loading PR #{pr_id}...");
+        self.error = None;
+        match get_pull_request_native(
+            Some(provider),
+            workspace.as_str(),
+            repo_name.as_str(),
+            pr_id,
+        ) {
+            Ok(detail) => {
+                self.comments = list_comments_native(
+                    Some(provider),
+                    workspace.as_str(),
+                    repo_name.as_str(),
+                    pr_id,
+                )
+                .unwrap_or_else(|error| {
+                    self.error = Some(format!("Comments failed: {error}"));
+                    Vec::new()
+                });
+                self.diff = get_pr_diff_native(
+                    Some(provider),
+                    workspace.as_str(),
+                    repo_name.as_str(),
+                    pr_id,
+                )
+                .map_err(|error| {
+                    self.error = Some(format!("Diff failed: {error}"));
+                })
+                .ok();
+                self.detail = Some(detail);
+                self.status = format!("Loaded PR #{pr_id}");
+            }
+            Err(error) => {
+                self.detail = None;
+                self.comments.clear();
+                self.diff = None;
+                self.error = Some(error);
+                self.status = "Failed to load PR detail".to_string();
+            }
+        }
     }
 
     fn view_state(&self) -> TuiState<'_> {
         TuiState {
             repos: &self.repos,
             selected_repo: self.selected_repo,
-            status: "Ready",
+            focus: self.focus,
+            pull_requests: &self.pull_requests,
+            selected_pr: self.selected_pr,
+            detail: self.detail.as_ref(),
+            comments: &self.comments,
+            diff: self.diff.as_deref(),
+            error: self.error.as_deref(),
+            status: self.status.as_str(),
         }
     }
 }
@@ -100,6 +276,7 @@ mod tests {
     #[test]
     fn repo_selection_stays_in_bounds() {
         let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.pull_requests.clear();
 
         app.handle_key(KeyCode::Down);
         assert_eq!(app.selected_repo, 0);
