@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`b872d78` - terminal UI `.lachesi/` policy loading and AI review output view.
+`8def318` - repository-owned prompt replacement for AI review.
 
 ## Next item
 

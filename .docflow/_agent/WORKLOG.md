@@ -12,3 +12,4 @@ Append one row per commit. Newest at the bottom.
 | 2026-07-23 | `6a07e25` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Hardened temporary repository fixtures for parallel Rust test runs. |
 | 2026-07-23 | `2eedb4b` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Added mouse selection, GitHub-capable TUI loading, and explicit AI review trigger support. |
 | 2026-07-23 | `b872d78` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Added `.lachesi/` policy-folder loading and terminal AI review output display. |
+| 2026-07-23 | `8def318` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Changed repository-owned prompts to replace the built-in AI review prompt. |
