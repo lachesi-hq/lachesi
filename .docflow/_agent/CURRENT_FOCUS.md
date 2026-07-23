@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`cbd4719` - suppress optional skill/tool noise in AI review output.
+`d9c1b0d` - add terminal PR author metadata and open/draft/merged filters.
 
 ## Next item
 
