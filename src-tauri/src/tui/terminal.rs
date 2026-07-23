@@ -13,7 +13,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 
 pub struct TerminalGuard {
     terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -47,6 +47,12 @@ impl TerminalGuard {
 
     pub fn interrupted(&self) -> bool {
         self.interrupted.load(Ordering::SeqCst)
+    }
+
+    pub fn area(&self) -> io::Result<Rect> {
+        self.terminal
+            .size()
+            .map(|size| Rect::new(0, 0, size.width, size.height))
     }
 
     pub fn suspend<T>(&mut self, action: impl FnOnce() -> T) -> io::Result<T> {

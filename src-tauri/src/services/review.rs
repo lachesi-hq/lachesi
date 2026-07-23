@@ -2154,6 +2154,15 @@ fn clone_inline_review_state(store: &AiReviewRunStore, key: &str) -> Option<AiRe
     })
 }
 
+pub fn get_ai_review_run_state_native(
+    store: &AiReviewRunStore,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Option<AiReviewRunState> {
+    clone_inline_review_state(store, &pr_key(workspace, repo, id))
+}
+
 fn append_inline_review_log(
     store: &AiReviewRunStore,
     key: &str,
@@ -4730,6 +4739,103 @@ pub fn load_ai_review_store(
     load_review_store(&workspace, &repo, id)
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn start_inline_review_native(
+    store: AiReviewRunStore,
+    workspace: String,
+    repo: String,
+    id: u32,
+    title: String,
+    source_branch: String,
+    destination_branch: String,
+    payload: String,
+    display_message: Option<String>,
+    review_kind: Option<String>,
+    thread_title: Option<String>,
+    skip_analyzers: bool,
+    ai_provider: AiProvider,
+    claude_model: Option<String>,
+    claude_effort: Option<String>,
+    codex_model: Option<String>,
+    codex_effort: Option<String>,
+    review_profile: Option<String>,
+) -> Result<AiReviewRunState, String> {
+    let key = pr_key(&workspace, &repo, id);
+    let thread_id = now_id("thread");
+    let (initial, run_id) = begin_inline_review_run(
+        &store,
+        &key,
+        title,
+        thread_id.clone(),
+        AiReviewTurnKind::Initial,
+        review_kind.as_deref(),
+    )?;
+    let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
+    let created_at = now_ms();
+    let mut review_store = load_review_store(&workspace, &repo, id)?.unwrap_or_default();
+    review_store.active_thread_id = Some(thread_id.clone());
+    let mut thread = AiReviewThread {
+        id: thread_id.clone(),
+        title: thread_title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(review_thread_title),
+        created_at: created_at.clone(),
+        updated_at: created_at.clone(),
+        claude_session_id: None,
+        messages: Vec::new(),
+    };
+    if let Some(message) = display_message
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        append_review_message(
+            &mut thread,
+            AiReviewMessageRole::User,
+            message.to_string(),
+            created_at,
+        );
+    }
+    review_store.threads.push(thread);
+    if let Err(error) = save_review_store(&workspace, &repo, id, &review_store) {
+        set_inline_review_failed(&store, &key, run_id, error.clone());
+        return Err(error);
+    }
+    let store_clone = store.clone();
+    std::thread::spawn(move || {
+        if let Err(error) = run_inline_review_pipeline(
+            store_clone.clone(),
+            key.clone(),
+            run_id,
+            workspace,
+            repo,
+            id,
+            source_branch,
+            destination_branch,
+            thread_id,
+            AiReviewTurnKind::Initial,
+            started_at,
+            payload.clone(),
+            payload,
+            None,
+            None,
+            ai_provider,
+            claude_model,
+            claude_effort,
+            codex_model,
+            codex_effort,
+            skip_analyzers,
+            review_profile,
+        ) {
+            set_inline_review_failed(&store_clone, &key, run_id, error);
+        }
+    });
+    Ok(initial)
+}
+
 #[tauri::command]
 pub fn create_ai_review_thread(
     workspace: String,
@@ -4856,80 +4962,26 @@ pub async fn start_inline_review(
 ) -> Result<AiReviewRunState, String> {
     let ai_provider = ai_provider.unwrap_or_default();
     let skip_analyzers = skip_analyzers.unwrap_or(false);
-    let key = pr_key(&workspace, &repo, id);
-    let thread_id = now_id("thread");
-    let (initial, run_id) = begin_inline_review_run(
-        store.inner(),
-        &key,
+    start_inline_review_native(
+        store.inner().clone(),
+        workspace,
+        repo,
+        id,
         title,
-        thread_id.clone(),
-        AiReviewTurnKind::Initial,
-        review_kind.as_deref(),
-    )?;
-    let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
-    let created_at = now_ms();
-    let mut review_store = load_review_store(&workspace, &repo, id)?.unwrap_or_default();
-    review_store.active_thread_id = Some(thread_id.clone());
-    let mut thread = AiReviewThread {
-        id: thread_id.clone(),
-        title: thread_title
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(review_thread_title),
-        created_at: created_at.clone(),
-        updated_at: created_at.clone(),
-        claude_session_id: None,
-        messages: Vec::new(),
-    };
-    if let Some(message) = display_message
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        append_review_message(
-            &mut thread,
-            AiReviewMessageRole::User,
-            message.to_string(),
-            created_at.clone(),
-        );
-    }
-    review_store.threads.push(thread);
-    if let Err(error) = save_review_store(&workspace, &repo, id, &review_store) {
-        set_inline_review_failed(store.inner(), &key, run_id, error.clone());
-        return Err(error);
-    }
-    let store_clone = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(error) = run_inline_review_pipeline(
-            store_clone.clone(),
-            key.clone(),
-            run_id,
-            workspace,
-            repo,
-            id,
-            source_branch,
-            destination_branch,
-            thread_id,
-            AiReviewTurnKind::Initial,
-            started_at,
-            payload.clone(),
-            payload,
-            None,
-            None,
-            ai_provider,
-            claude_model,
-            claude_effort,
-            codex_model,
-            codex_effort,
-            skip_analyzers,
-            review_profile,
-        ) {
-            set_inline_review_failed(&store_clone, &key, run_id, error);
-        }
-    });
-    Ok(initial)
+        source_branch,
+        destination_branch,
+        payload,
+        display_message,
+        review_kind,
+        thread_title,
+        skip_analyzers,
+        ai_provider,
+        claude_model,
+        claude_effort,
+        codex_model,
+        codex_effort,
+        review_profile,
+    )
 }
 
 #[tauri::command]

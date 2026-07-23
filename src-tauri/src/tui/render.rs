@@ -6,6 +6,7 @@ use ratatui::{
 
 use crate::config::{RepoRef, ReviewProvider};
 use crate::services::bitbucket::{PrComment, PullRequestDetail, PullRequestSummary};
+use crate::services::review::{AiReviewRunState, AiReviewRunStatus};
 
 #[derive(Clone, Copy)]
 pub struct TuiState<'a> {
@@ -19,6 +20,7 @@ pub struct TuiState<'a> {
     pub diff: Option<&'a str>,
     pub drafts: &'a [DraftComment],
     pub composer: Option<&'a str>,
+    pub ai_review: Option<&'a AiReviewRunState>,
     pub error: Option<&'a str>,
     pub status: &'a str,
 }
@@ -35,33 +37,79 @@ pub enum FocusPane {
     PullRequests,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseTarget {
+    Repository(usize),
+    PullRequest(usize),
+}
+
 pub fn render(frame: &mut Frame<'_>, state: TuiState<'_>) {
     let area = frame.area();
-    let [header, body, footer] = *Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(5),
-            Constraint::Length(2),
-        ])
-        .split(area)
-    else {
+    let [header, body, footer] = *vertical_areas().split(area) else {
         return;
     };
 
     render_header(frame, header);
 
-    let [repos, review] = *Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(36), Constraint::Percentage(64)])
-        .split(body)
-    else {
+    let [repos, review] = *body_areas().split(body) else {
         return;
     };
 
     render_repos(frame, repos, state);
     render_review(frame, review, state);
     render_footer(frame, footer, state.status);
+}
+
+pub fn mouse_target(area: Rect, x: u16, y: u16, state: TuiState<'_>) -> Option<MouseTarget> {
+    let [_, body, _] = *vertical_areas().split(area) else {
+        return None;
+    };
+    let [repos, review] = *body_areas().split(body) else {
+        return None;
+    };
+    if let Some(index) = list_index_at(repos, x, y, state.repos.len()) {
+        return Some(MouseTarget::Repository(index));
+    }
+
+    let [pr_list, _] = *review_areas().split(review) else {
+        return None;
+    };
+    list_index_at(pr_list, x, y, state.pull_requests.len()).map(MouseTarget::PullRequest)
+}
+
+fn vertical_areas() -> Layout {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(2),
+        ])
+}
+
+fn body_areas() -> Layout {
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(36), Constraint::Percentage(64)])
+}
+
+fn review_areas() -> Layout {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(34), Constraint::Percentage(66)])
+}
+
+fn list_index_at(area: Rect, x: u16, y: u16, len: usize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    let inner_x = area.x.saturating_add(1)..area.x.saturating_add(area.width.saturating_sub(1));
+    let inner_y = area.y.saturating_add(1)..area.y.saturating_add(area.height.saturating_sub(1));
+    if !inner_x.contains(&x) || !inner_y.contains(&y) {
+        return None;
+    }
+    let index = usize::from(y.saturating_sub(area.y).saturating_sub(1));
+    (index < len).then_some(index)
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect) {
@@ -106,11 +154,7 @@ fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
 }
 
 fn render_review(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
-    let [pr_list, detail] = *Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(34), Constraint::Percentage(66)])
-        .split(area)
-    else {
+    let [pr_list, detail] = *review_areas().split(area) else {
         return;
     };
     render_pull_requests(frame, pr_list, state);
@@ -174,6 +218,20 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
                 "Drafts: {} pending",
                 state.drafts.len()
             )));
+            if let Some(ai_review) = state.ai_review {
+                lines.push(Line::from(format!(
+                    "AI review: {}{}",
+                    ai_review_status_label(ai_review.status),
+                    ai_review
+                        .error
+                        .as_deref()
+                        .map(|error| format!(" ({error})"))
+                        .unwrap_or_default()
+                )));
+                if let Some(log) = ai_review.logs.last() {
+                    lines.push(Line::from(format!("AI log: {log}")));
+                }
+            }
             lines.push(Line::from(""));
             lines.push(Line::from(description_preview(
                 detail.description_raw.as_str(),
@@ -237,6 +295,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         Span::raw("c draft  "),
         Span::raw("p publish  "),
         Span::raw("x discard  "),
+        Span::raw("a ai review  "),
         Span::raw("g lazygit  "),
         Span::raw("r refresh  "),
         Span::raw(status),
@@ -293,6 +352,16 @@ fn provider_label(provider: ReviewProvider) -> &'static str {
     }
 }
 
+fn ai_review_status_label(status: AiReviewRunStatus) -> &'static str {
+    match status {
+        AiReviewRunStatus::Idle => "idle",
+        AiReviewRunStatus::Running => "running",
+        AiReviewRunStatus::Succeeded => "succeeded",
+        AiReviewRunStatus::Failed => "failed",
+        AiReviewRunStatus::Cancelled => "cancelled",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ratatui::{backend::TestBackend, Terminal};
@@ -329,6 +398,7 @@ mod tests {
                         diff: None,
                         drafts: &[],
                         composer: None,
+                        ai_review: None,
                         error: None,
                         status: "Ready",
                     },
@@ -381,6 +451,7 @@ mod tests {
                         diff: None,
                         drafts: &[],
                         composer: None,
+                        ai_review: None,
                         error: None,
                         status: "Ready",
                     },
@@ -442,6 +513,7 @@ mod tests {
                             raw: "Please check this.".to_string(),
                         }],
                         composer: None,
+                        ai_review: None,
                         error: None,
                         status: "Loaded",
                     },
@@ -476,6 +548,7 @@ mod tests {
                         diff: None,
                         drafts: &[],
                         composer: Some("pending thought"),
+                        ai_review: None,
                         error: None,
                         status: "Composing",
                     },
@@ -485,5 +558,77 @@ mod tests {
 
         let text = buffer_text(&terminal);
         assert!(text.contains("Draft: pending thought"));
+    }
+
+    #[test]
+    fn maps_mouse_clicks_to_repository_and_pull_request_rows() {
+        let repos = vec![
+            RepoRef {
+                provider: ReviewProvider::Github,
+                workspace: "lachesi-hq".to_string(),
+                repo: "lachesi".to_string(),
+                local_path: None,
+            },
+            RepoRef {
+                provider: ReviewProvider::Bitbucket,
+                workspace: "team".to_string(),
+                repo: "api".to_string(),
+                local_path: None,
+            },
+        ];
+        let pull_requests = vec![
+            PullRequestSummary {
+                id: 12,
+                title: "One".to_string(),
+                author_display_name: String::new(),
+                author_account_id: None,
+                source_branch: "one".to_string(),
+                destination_branch: "main".to_string(),
+                state: "OPEN".to_string(),
+                draft: false,
+                comment_count: 0,
+                created_on: String::new(),
+                updated_on: String::new(),
+                reviewers: Vec::new(),
+            },
+            PullRequestSummary {
+                id: 13,
+                title: "Two".to_string(),
+                author_display_name: String::new(),
+                author_account_id: None,
+                source_branch: "two".to_string(),
+                destination_branch: "main".to_string(),
+                state: "OPEN".to_string(),
+                draft: false,
+                comment_count: 0,
+                created_on: String::new(),
+                updated_on: String::new(),
+                reviewers: Vec::new(),
+            },
+        ];
+        let state = TuiState {
+            repos: &repos,
+            selected_repo: 0,
+            focus: FocusPane::Repositories,
+            pull_requests: &pull_requests,
+            selected_pr: 0,
+            detail: None,
+            comments: &[],
+            diff: None,
+            drafts: &[],
+            composer: None,
+            ai_review: None,
+            error: None,
+            status: "Ready",
+        };
+
+        assert_eq!(
+            mouse_target(Rect::new(0, 0, 100, 24), 2, 5, state),
+            Some(MouseTarget::Repository(1))
+        );
+        assert_eq!(
+            mouse_target(Rect::new(0, 0, 100, 24), 38, 5, state),
+            Some(MouseTarget::PullRequest(1))
+        );
     }
 }
