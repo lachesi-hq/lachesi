@@ -13,6 +13,7 @@ Be concise. If nothing is wrong at a severity level, omit it.
 Before reviewing, inspect any manual reference with a local path when it is relevant.
 Use referenced repositories as read-only context for architecture, conventions, existing patterns, and API contracts.
 Do not make repository-wide claims unless you inspected the relevant reference files. If you cannot inspect them, say so.
+Do not mention unavailable optional skills or tools in the review output unless their absence affects confidence.
 
 If the diff is documentation or conventions only, review it for:
 - contradictions with existing repository conventions;
