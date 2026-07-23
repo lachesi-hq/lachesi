@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`d9c1b0d` - add terminal PR author metadata and open/draft/merged filters.
+`3f65b76` - add the terminal PR filter panel.
 
 ## Next item
 
