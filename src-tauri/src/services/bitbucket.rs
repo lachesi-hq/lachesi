@@ -587,54 +587,54 @@ struct GhCompare {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestSummary {
-    id: u32,
-    title: String,
-    author_display_name: String,
-    author_account_id: Option<String>,
-    source_branch: String,
-    destination_branch: String,
-    state: String,
-    draft: bool,
-    comment_count: u32,
-    created_on: String,
-    updated_on: String,
-    reviewers: Vec<Participant>,
+    pub id: u32,
+    pub title: String,
+    pub author_display_name: String,
+    pub author_account_id: Option<String>,
+    pub source_branch: String,
+    pub destination_branch: String,
+    pub state: String,
+    pub draft: bool,
+    pub comment_count: u32,
+    pub created_on: String,
+    pub updated_on: String,
+    pub reviewers: Vec<Participant>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestPage {
-    values: Vec<PullRequestSummary>,
-    size: u32,
-    page: u32,
-    has_next: bool,
+    pub values: Vec<PullRequestSummary>,
+    pub size: u32,
+    pub page: u32,
+    pub has_next: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Participant {
-    display_name: String,
-    account_id: Option<String>,
-    role: String,
-    approved: bool,
+    pub display_name: String,
+    pub account_id: Option<String>,
+    pub role: String,
+    pub approved: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestDetail {
-    id: u32,
-    title: String,
-    description_raw: String,
-    state: String,
-    draft: bool,
-    author_display_name: String,
-    reviewers: Vec<Participant>,
-    source_branch: String,
-    destination_branch: String,
-    source_commit_hash: Option<String>,
-    destination_commit_hash: Option<String>,
-    created_on: String,
-    updated_on: String,
+    pub id: u32,
+    pub title: String,
+    pub description_raw: String,
+    pub state: String,
+    pub draft: bool,
+    pub author_display_name: String,
+    pub reviewers: Vec<Participant>,
+    pub source_branch: String,
+    pub destination_branch: String,
+    pub source_commit_hash: Option<String>,
+    pub destination_commit_hash: Option<String>,
+    pub created_on: String,
+    pub updated_on: String,
 }
 
 #[derive(Serialize)]
@@ -666,22 +666,22 @@ pub struct ClosedPrAnalyticsSnapshot {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InlineAnchor {
-    path: String,
-    to: Option<u32>,
-    from: Option<u32>,
+    pub path: String,
+    pub to: Option<u32>,
+    pub from: Option<u32>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrComment {
-    id: u32,
-    parent_id: Option<u32>,
-    content_raw: String,
-    content_html: Option<String>,
-    user_display_name: String,
-    created_on: String,
-    deleted: bool,
-    inline: Option<InlineAnchor>,
+    pub id: u32,
+    pub parent_id: Option<u32>,
+    pub content_raw: String,
+    pub content_html: Option<String>,
+    pub user_display_name: String,
+    pub created_on: String,
+    pub deleted: bool,
+    pub inline: Option<InlineAnchor>,
 }
 
 #[derive(Serialize)]
@@ -709,11 +709,11 @@ pub struct BranchStatus {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ListPrOptions {
-    state: Option<String>,
-    page: Option<u32>,
-    pagelen: Option<u32>,
-    query: Option<String>,
-    updated_after: Option<String>,
+    pub state: Option<String>,
+    pub page: Option<u32>,
+    pub pagelen: Option<u32>,
+    pub query: Option<String>,
+    pub updated_after: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -1340,8 +1340,7 @@ fn cached_closed_metrics_for_repos(repos: &[RepoRef]) -> Result<Vec<ClosedPrMetr
 // Commands — connection / config / credentials
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub fn load_config() -> Result<AppConfig, String> {
+pub fn load_config_native() -> Result<AppConfig, String> {
     let mut cfg = config::load();
     cfg.configured = !cfg.repos.is_empty();
     cfg.has_credentials = credentials::has();
@@ -1352,23 +1351,31 @@ pub fn load_config() -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
-pub fn validate_repo_review_config(
-    repo_path: String,
-    review_profile: Option<String>,
+pub fn load_config() -> Result<AppConfig, String> {
+    load_config_native()
+}
+
+pub fn validate_repo_review_config_native(
+    repo_path: &Path,
+    review_profile: Option<&str>,
 ) -> Result<RepoReviewConfigLoadResult, String> {
     if review_profile
-        .as_deref()
         .map(str::trim)
         .filter(|profile| !profile.is_empty())
         .is_some()
     {
-        repo_config::load_from_repo_path_with_profile(
-            Path::new(&repo_path),
-            review_profile.as_deref(),
-        )
+        repo_config::load_from_repo_path_with_profile(repo_path, review_profile)
     } else {
-        repo_config::load_from_repo_path(Path::new(&repo_path))
+        repo_config::load_from_repo_path(repo_path)
     }
+}
+
+#[tauri::command]
+pub fn validate_repo_review_config(
+    repo_path: String,
+    review_profile: Option<String>,
+) -> Result<RepoReviewConfigLoadResult, String> {
+    validate_repo_review_config_native(Path::new(&repo_path), review_profile.as_deref())
 }
 
 #[tauri::command]
@@ -1513,6 +1520,24 @@ pub async fn get_current_user(provider: Option<ReviewProvider>) -> Result<Worksp
 // Commands — pull requests
 // ---------------------------------------------------------------------------
 
+pub fn list_pull_requests_native(
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+    opts: &ListPrOptions,
+) -> Result<PullRequestPage, String> {
+    match provider_for(provider, workspace, repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            fetch_pull_requests_page(&client, workspace, repo, opts)
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            fetch_github_pull_requests_page(&client, workspace, repo, opts)
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn list_pull_requests(
     provider: Option<ReviewProvider>,
@@ -1520,17 +1545,7 @@ pub async fn list_pull_requests(
     repo: String,
     opts: ListPrOptions,
 ) -> Result<PullRequestPage, String> {
-    run(move || match provider_for(provider, &workspace, &repo) {
-        ReviewProvider::Bitbucket => {
-            let client = BitbucketClient::from_stored()?;
-            fetch_pull_requests_page(&client, &workspace, &repo, &opts)
-        }
-        ReviewProvider::Github => {
-            let client = GithubClient::from_stored()?;
-            fetch_github_pull_requests_page(&client, &workspace, &repo, &opts)
-        }
-    })
-    .await
+    run(move || list_pull_requests_native(provider, &workspace, &repo, &opts)).await
 }
 
 #[tauri::command]
@@ -1675,17 +1690,25 @@ pub async fn get_pull_request(
     repo: String,
     id: u32,
 ) -> Result<PullRequestDetail, String> {
-    run(move || match provider_for(provider, &workspace, &repo) {
+    run(move || get_pull_request_native(provider, &workspace, &repo, id)).await
+}
+
+pub fn get_pull_request_native(
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Result<PullRequestDetail, String> {
+    match provider_for(provider, workspace, repo) {
         ReviewProvider::Bitbucket => {
             let client = BitbucketClient::from_stored()?;
-            fetch_pull_request_detail(&client, &workspace, &repo, id)
+            fetch_pull_request_detail(&client, workspace, repo, id)
         }
         ReviewProvider::Github => {
             let client = GithubClient::from_stored()?;
-            fetch_github_pull_request_detail(&client, &workspace, &repo, id)
+            fetch_github_pull_request_detail(&client, workspace, repo, id)
         }
-    })
-    .await
+    }
 }
 
 #[tauri::command]
@@ -1795,21 +1818,29 @@ pub async fn get_pr_diff(
     repo: String,
     id: u32,
 ) -> Result<String, String> {
-    run(move || match provider_for(provider, &workspace, &repo) {
+    run(move || get_pr_diff_native(provider, &workspace, &repo, id)).await
+}
+
+pub fn get_pr_diff_native(
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Result<String, String> {
+    match provider_for(provider, workspace, repo) {
         ReviewProvider::Bitbucket => {
             let client = BitbucketClient::from_stored()?;
-            let url = format!("{}/pullrequests/{id}/diff", repo_base(&workspace, &repo)?);
+            let url = format!("{}/pullrequests/{id}/diff", repo_base(workspace, repo)?);
             let resp = send_checked(client.get(&url))?;
             resp.text().map_err(|e| e.to_string())
         }
         ReviewProvider::Github => {
             let client = GithubClient::from_stored()?;
-            let url = format!("{}/pulls/{id}", github_repo_base(&workspace, &repo)?);
+            let url = format!("{}/pulls/{id}", github_repo_base(workspace, repo)?);
             let resp = github_send_checked(client.get_diff(&url))?;
             resp.text().map_err(|e| e.to_string())
         }
-    })
-    .await
+    }
 }
 
 #[tauri::command]
@@ -1857,32 +1888,38 @@ pub async fn list_comments(
     repo: String,
     id: u32,
 ) -> Result<Vec<PrComment>, String> {
-    run(move || {
-        match provider_for(provider, &workspace, &repo) {
-            ReviewProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored()?;
-                let mut url = format!(
-                    "{}/pullrequests/{id}/comments?pagelen=100&fields=next,values.id,values.created_on,values.deleted,values.content.raw,values.content.html,values.user.display_name,values.inline.path,values.inline.to,values.inline.from,values.parent.id",
-                    repo_base(&workspace, &repo)?
-                );
-                let mut out = Vec::new();
-                loop {
-                    let page: BbCommentPage = get_json(client.get(&url))?;
-                    out.extend(page.values.into_iter().map(map_comment));
-                    match page.next {
-                        Some(next) => url = next,
-                        None => break,
-                    }
+    run(move || list_comments_native(provider, &workspace, &repo, id)).await
+}
+
+pub fn list_comments_native(
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Result<Vec<PrComment>, String> {
+    match provider_for(provider, workspace, repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            let mut url = format!(
+                "{}/pullrequests/{id}/comments?pagelen=100&fields=next,values.id,values.created_on,values.deleted,values.content.raw,values.content.html,values.user.display_name,values.inline.path,values.inline.to,values.inline.from,values.parent.id",
+                repo_base(workspace, repo)?
+            );
+            let mut out = Vec::new();
+            loop {
+                let page: BbCommentPage = get_json(client.get(&url))?;
+                out.extend(page.values.into_iter().map(map_comment));
+                match page.next {
+                    Some(next) => url = next,
+                    None => break,
                 }
-                Ok(out)
             }
-            ReviewProvider::Github => {
-                let client = GithubClient::from_stored()?;
-                fetch_github_comments(&client, &workspace, &repo, id)
-            }
+            Ok(out)
         }
-    })
-    .await
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            fetch_github_comments(&client, workspace, repo, id)
+        }
+    }
 }
 
 #[tauri::command]
@@ -2063,6 +2100,8 @@ pub async fn delete_comment(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn pr_query_filter_combines_title_and_updated_window() {
@@ -2097,6 +2136,24 @@ mod tests {
                     .to_string(),
             ),
         );
+    }
+
+    #[test]
+    fn native_repo_config_validation_uses_shared_loader() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let repo_path =
+            std::env::temp_dir().join(format!("lachesi-native-config-validation-{nonce}"));
+        fs::create_dir_all(&repo_path).expect("create temp repo");
+        fs::write(repo_path.join(".lachesi.yaml"), "version: 0.1\n").expect("write config");
+
+        let result = validate_repo_review_config_native(&repo_path, None).expect("validate config");
+
+        assert_eq!(result.repo_path, repo_path.to_string_lossy());
+        assert_eq!(result.errors.len(), 0);
+        fs::remove_dir_all(repo_path).expect("remove temp repo");
     }
 
     #[test]
