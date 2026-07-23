@@ -1,0 +1,354 @@
+id: agentic-code
+name: Agentic Code Review Rules
+review:
+  prompt:
+    extend: |
+      Review agent-authored changes for unsupported confidence, broad rewrites,
+      missing local evidence, instruction leakage, and accidental product or
+      architecture drift. Prefer findings that cite changed files, commands run,
+      or absent verification.
+  findings:
+    minSeverity: medium
+    requireAnchors: false
+policy:
+  rules:
+    - id: agentic.verification-required
+      severity: high
+      confidence: high
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "**/*"
+      instruction: >
+        Flag changes that claim correctness without naming the local checks,
+        tests, or manual evidence that support the claim.
+      rationale: >
+        Agentic code often looks plausible while skipping verification.
+      remediation: >
+        Run the narrowest relevant check and include the command or observable
+        result in the review summary.
+    - id: agentic.large-refactor-evidence
+      severity: high
+      confidence: high
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "src/**"
+          - "src-tauri/**"
+          - "apps/**"
+      instruction: >
+        Treat broad refactors as risky unless the diff preserves public
+        behavior and includes focused tests or snapshots for the touched paths.
+      remediation: >
+        Split mechanical movement from behavior changes or add focused
+        regression coverage.
+    - id: agentic.no-instruction-leakage
+      severity: critical
+      confidence: high
+      enforcement: prompt
+      instruction: >
+        Flag committed prompts, logs, fixtures, docs, or examples that expose
+        private operator instructions, customer context, credentials, or hidden
+        chain-of-thought content.
+      remediation: >
+        Remove private context, replace it with sanitized examples, and keep
+        operational instructions in internal documentation only.
+    - id: agentic.dependency-drift
+      severity: high
+      confidence: medium
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "package.json"
+          - "pnpm-lock.yaml"
+          - "src-tauri/Cargo.toml"
+          - "src-tauri/Cargo.lock"
+      instruction: >
+        Flag dependency changes that are not tied to a feature need, security
+        fix, or compatibility requirement.
+      remediation: >
+        Explain why the dependency changed, pin the intended version, and run
+        the lockfile-aware install or build lane.
+    - id: agentic.contract-drift
+      severity: high
+      confidence: high
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "src/**/*.ts"
+          - "src/**/*.tsx"
+          - "src-tauri/src/**/*.rs"
+      instruction: >
+        Flag changes where a DTO, command payload, schema, or config contract is
+        modified on one side without updating the matching consumer, producer,
+        mock, fixture, or documentation.
+      remediation: >
+        Update all contract surfaces in the same change and add a shape or
+        parity test where practical.
+    - id: agentic.behavior-preserving-claim
+      severity: medium
+      confidence: medium
+      enforcement: prompt
+      instruction: >
+        Flag review summaries or code comments that claim a change is
+        behavior-preserving when the diff includes branching, persistence,
+        network, parsing, or error-handling changes.
+      remediation: >
+        Reword the claim or add targeted tests that prove the intended behavior.
+    - id: agentic.generated-error-copy
+      severity: medium
+      confidence: medium
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "src/**"
+          - "src-tauri/src/**"
+      instruction: >
+        Flag vague generated error text that hides the failed action, local
+        path, provider, or remediation from the user or operator.
+      remediation: >
+        Keep errors actionable and specific while avoiding sensitive values.
+    - id: agentic.config-backward-compatibility
+      severity: high
+      confidence: high
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "**/*.yaml"
+          - "**/*.yml"
+          - "**/*.json"
+          - "src-tauri/src/repo_config.rs"
+      instruction: >
+        Flag config changes that reject existing valid files or silently ignore
+        newly required fields without migration or compatibility notes.
+      remediation: >
+        Preserve older supported config shapes or document and test the
+        migration path.
+    - id: agentic.test-fixture-realism
+      severity: medium
+      confidence: medium
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "**/*.test.ts"
+          - "**/*.test.tsx"
+          - "src/mock-tauri/**"
+      instruction: >
+        Flag fixtures that are too small or idealized to catch the behavior the
+        generated code is supposed to protect.
+      remediation: >
+        Include representative empty, partial, error, and multi-item cases.
+    - id: agentic.public-private-boundary
+      severity: high
+      confidence: high
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "docs/**"
+          - "apps/docs/**"
+          - "apps/web/**"
+          - "examples/**"
+      instruction: >
+        Flag public docs or examples that include private customer workflow,
+        pricing source notes, proprietary paths, internal architecture labels,
+        or non-public operational process.
+      remediation: >
+        Replace private detail with generic examples and keep internal context
+        in private notes.
+    - id: agentic.no-silent-fallbacks
+      severity: medium
+      confidence: high
+      enforcement: prompt
+      instruction: >
+        Flag fallback behavior that hides missing configuration, failed
+        analyzers, unavailable providers, or unsupported rule types without a
+        warning or visible log.
+      remediation: >
+        Emit a warning, record the fallback in run metadata, and keep the main
+        flow usable when the fallback is non-blocking.
+    - id: agentic.review-summary-grounding
+      severity: medium
+      confidence: medium
+      enforcement: prompt
+      instruction: >
+        Flag generated summaries that describe files or test results not present
+        in the diff, evidence, or local command output.
+      remediation: >
+        Ground summaries in actual changed paths and recorded evidence only.
+  pathRules:
+    - id: agentic.react-state-scope
+      severity: medium
+      paths:
+        include:
+          - "src/**/*.tsx"
+          - "src/**/*.ts"
+      instruction: >
+        React changes should keep state ownership local and explicit. Flag
+        generated state lifted to broad shells without a workflow need.
+      remediation: >
+        Keep state in the smallest component, hook, or service that owns the
+        workflow.
+    - id: agentic.rust-error-mapping
+      severity: high
+      paths:
+        include:
+          - "src-tauri/src/**/*.rs"
+      instruction: >
+        Native errors crossing IPC must be mapped to user-actionable strings
+        and must not expose sensitive local details.
+      remediation: >
+        Map native errors at command or service boundaries and cover failure
+        paths with tests.
+    - id: agentic.docs-match-implementation
+      severity: medium
+      paths:
+        include:
+          - "docs/**"
+          - "apps/docs/**"
+          - "README.md"
+      instruction: >
+        Documentation added by an agent should describe implemented behavior or
+        clearly mark future work. Flag overclaims.
+      remediation: >
+        Align copy with current code or move future direction into roadmap text.
+    - id: agentic.schema-tests
+      severity: high
+      paths:
+        include:
+          - "src-tauri/src/repo_config.rs"
+          - "docs/specs/**"
+          - "examples/**/*.yaml"
+          - "examples/**/*.json"
+      instruction: >
+        Schema or example changes should be validated by code tests or checked
+        examples so docs do not drift from the loader.
+      remediation: >
+        Add a parser/load test using the checked-in example.
+    - id: agentic.no-broad-delete
+      severity: high
+      paths:
+        include:
+          - "**/*"
+      instruction: >
+        Flag generated diffs that delete documentation, tests, fixtures, or
+        config while implementing unrelated behavior.
+      remediation: >
+        Keep deletions scoped, explain why they are required, or split cleanup
+        into a separate change.
+    - id: agentic.analyzer-command-safety
+      severity: medium
+      paths:
+        include:
+          - ".lachesi.yaml"
+          - ".lachesi.local.yaml"
+          - "examples/**/*.yaml"
+      instruction: >
+        Analyzer commands should be deterministic local checks, not networked
+        install, publish, deployment, or destructive commands.
+      remediation: >
+        Use existing test, typecheck, lint, or scanner commands and document
+        setup separately.
+    - id: agentic.review-artifact-redaction
+      severity: high
+      paths:
+        include:
+          - "docs/**"
+          - "examples/**"
+          - "src-tauri/src/**/*.rs"
+      instruction: >
+        Review artifacts and examples should redact sensitive local paths,
+        private repository names, credentials, and customer identifiers.
+      remediation: >
+        Replace sensitive details with stable placeholders before committing.
+  astRules:
+    - id: agentic.typescript-no-any-spread
+      language: typescript
+      severity: medium
+      selector:
+        kind: tsAnyKeyword
+      appliesTo:
+        include:
+          - "src/**"
+          - "apps/**"
+      instruction: >
+        Flag new broad `any` usage introduced to make generated code compile
+        without preserving types.
+      remediation: >
+        Model the expected shape explicitly or narrow the generic boundary.
+    - id: agentic.typescript-no-empty-catch
+      language: typescript
+      severity: high
+      selector:
+        kind: catchClause
+        bodyContainsOnlyComment: true
+      appliesTo:
+        include:
+          - "src/**"
+          - "apps/**"
+      instruction: >
+        Flag empty catch blocks that swallow generated-code failures.
+      remediation: >
+        Surface the failure through local state, logs, or an actionable error.
+    - id: agentic.rust-no-unwrap-in-command-paths
+      language: rust
+      severity: high
+      selector:
+        kind: methodCallExpression
+        method: unwrap
+      appliesTo:
+        include:
+          - "src-tauri/src/commands/**"
+      instruction: >
+        Flag new `unwrap()` calls in command paths where malformed input or IO
+        failure should return an IPC-safe error.
+      remediation: >
+        Use `?`, `map_err`, or explicit validation and add a failure-path test.
+profiles:
+  agentic-fast:
+    mode: fast
+    minSeverity: high
+    prompt:
+      extend: |
+        Focus on high-confidence regressions: missing verification, contract
+        drift, instruction leakage, unsafe fallbacks, and broad untested
+        refactors.
+    analyzers:
+      typecheck: optional
+      tests: optional
+      lint: optional
+  agentic-balanced:
+    mode: balanced
+    minSeverity: medium
+    prompt:
+      extend: |
+        Balance signal and coverage. Check evidence quality, generated-code
+        risk, config/schema drift, test realism, and public/private boundaries.
+    analyzers:
+      typecheck: required
+      tests: optional
+      lint: optional
+  agentic-strict:
+    mode: strict
+    minSeverity: low
+    prompt:
+      extend: |
+        Apply the full agentic-code checklist. Treat broad rewrites, unsupported
+        claims, missing negative tests, and undocumented config changes as
+        review blockers until evidence is added.
+    analyzers:
+      typecheck: required
+      tests: required
+      lint: required
+analyzers:
+  typecheck:
+    enabled: true
+    command: "pnpm run typecheck"
+    timeoutSeconds: 120
+  tests:
+    enabled: true
+    command: "pnpm run test"
+    timeoutSeconds: 180
+  lint:
+    enabled: true
+    command: "pnpm run lint"
+    timeoutSeconds: 120

@@ -49,7 +49,7 @@ ADR sources point to markdown files or directories listed in `.lachesi.yaml`:
 policy:
   sources:
     - type: adr
-      path: docs/adr
+      path: .docflow/adr
 ```
 
 ADR files are parsed for:
@@ -244,7 +244,7 @@ create a normalized finding:
   severity: "high",
   category: "architecture",
   source: "merged",
-  rationale: "ADR 0001 requires Bitbucket HTTP calls to stay in Rust.",
+  rationale: "Repository architecture policy requires provider API calls to stay behind the native boundary.",
   suggestedFix: "Move the API call behind a Tauri command and typed DTO.",
   evidenceIds: ["policy:adr:0001", "diff:file:src/foo.ts"],
   anchor: {

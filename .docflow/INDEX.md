@@ -1,0 +1,13 @@
+# ADR Index
+
+Generated from `.docflow/adr/`. Regenerate after adding an ADR or changing ADR
+metadata.
+
+| ADR | Title | Status | Date | Owner | Tags |
+|---:|---|---|---|---|---|
+| 0001 | Record architecture decisions as ADRs | Implemented | 2026-07-10 | default-agent | process, conventions |
+| 0002 | All Bitbucket HTTP lives in Rust | Implemented | 2026-06-18 | default-agent | tauri, rust, bitbucket, credentials |
+| 0003 | Credentials in the OS keychain, config in a settings file | Implemented | 2026-06-18 | default-agent | credentials, security, settings |
+| 0004 | Diff rendering with react-diff-view | Implemented | 2026-06-18 | default-agent | frontend, diff, review-ui |
+| 0005 | Publish an agentic code review policy pack prototype | Accepted | 2026-07-10 | default-agent | policy, examples, monetization |
+| 0006 | Support a terminal UI as a second local review interface | Accepted | 2026-07-23 | default-agent | tui, cli, rust, review-ui |

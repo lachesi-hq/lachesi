@@ -995,7 +995,7 @@ fn collect_forbidden_fields(
 mod tests {
     use super::{load_from_repo_path, load_from_str, RepoReviewConfigLoadResult};
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_repo() -> PathBuf {
@@ -1335,6 +1335,48 @@ policy:
         assert!(result.warnings.is_empty());
         assert_eq!(result.loaded_policy_packs[0].id, "react-saas");
         assert_eq!(result.config.unwrap().policy.unwrap().rules.len(), 1);
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn loads_checked_in_agentic_code_policy_pack() {
+        let repo = temp_repo();
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root");
+        let pack_dir = repo_root.join("examples/policy-packs/agentic-code");
+        assert!(pack_dir.join("pack.yaml").is_file());
+
+        let result = load_test_config(
+            &repo,
+            &format!(
+                r#"
+version: 0.1
+review:
+  profile: agentic-balanced
+policy:
+  packs:
+    - {}
+"#,
+                pack_dir.display()
+            ),
+        );
+
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        assert_eq!(result.selected_profile.as_deref(), Some("agentic-balanced"));
+        assert_eq!(result.loaded_policy_packs.len(), 1);
+        assert_eq!(result.loaded_policy_packs[0].id, "agentic-code");
+
+        let config = result.config.expect("config");
+        let policy = config.policy.expect("policy");
+        let declaration_count =
+            policy.rules.len() + policy.path_rules.len() + policy.ast_rules.len();
+        assert!((15..=25).contains(&declaration_count));
+        assert!(config.profiles.contains_key("agentic-fast"));
+        assert!(config.profiles.contains_key("agentic-balanced"));
+        assert!(config.profiles.contains_key("agentic-strict"));
+        assert!(config.analyzers.contains_key("typecheck"));
         let _ = fs::remove_dir_all(repo);
     }
 

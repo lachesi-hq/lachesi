@@ -174,11 +174,8 @@ Lachesi is split across a React frontend and a Rust/Tauri backend.
 - **Review model:** structured findings, evidence, publication state, and chat threads share the
   same TypeScript/Rust DTO vocabulary.
 
-Useful design notes live in:
+Implementation specs live in:
 
-- `docs/adr/0001-http-in-rust.md`
-- `docs/adr/0002-credentials-keychain.md`
-- `docs/adr/0003-diff-rendering.md`
 - `docs/specs/0001-findings-schema.md`
 - `docs/specs/0002-bitbucket-publication-model.md`
 - `docs/specs/0003-repository-config.md`

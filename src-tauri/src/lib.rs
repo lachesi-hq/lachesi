@@ -7,6 +7,7 @@ mod local_repo;
 mod repo_config;
 mod review_storage;
 mod services;
+pub mod tui;
 
 use commands::{bitbucket, context, repositories, review};
 use tauri::{

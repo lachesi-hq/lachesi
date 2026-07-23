@@ -22,6 +22,10 @@ dev:
 tauri-dev:
     pnpm tauri dev
 
+# Start the terminal UI.
+tui:
+    pnpm run tui
+
 # Typecheck + Vite production build.
 build:
     pnpm run build

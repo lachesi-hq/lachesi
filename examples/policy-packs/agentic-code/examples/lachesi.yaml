@@ -1,0 +1,25 @@
+version: 0.1
+
+review:
+  profile: agentic-balanced
+  mode: balanced
+
+paths:
+  include:
+    - "src/**"
+    - "src-tauri/**"
+    - "apps/**"
+    - "docs/**"
+  exclude:
+    - "dist/**"
+    - "target/**"
+    - "**/*.snap"
+
+policy:
+  packs:
+    - ./examples/policy-packs/agentic-code
+
+publish:
+  defaultMode: inline
+  requireManualSubmit: true
+  allowGeneralComments: true

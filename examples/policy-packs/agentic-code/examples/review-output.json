@@ -1,0 +1,47 @@
+{
+  "profile": "agentic-balanced",
+  "loadedPolicyPacks": [
+    {
+      "id": "agentic-code",
+      "name": "Agentic Code Review Rules"
+    }
+  ],
+  "findings": [
+    {
+      "ruleId": "agentic.verification-required",
+      "severity": "high",
+      "category": "verification",
+      "title": "Missing verification evidence",
+      "rationale": "The change updates repository configuration parsing but the review notes do not name a parser test, typecheck, or config validation command that was run.",
+      "suggestedFix": "Run the focused config loader tests and include the command in the review summary.",
+      "anchor": {
+        "path": "src-tauri/src/repo_config.rs",
+        "startLine": 42,
+        "endLine": null,
+        "side": "new"
+      },
+      "evidenceIds": [
+        "policy:agentic.verification-required",
+        "diff:file:src-tauri/src/repo_config.rs"
+      ]
+    },
+    {
+      "ruleId": "agentic.docs-match-implementation",
+      "severity": "medium",
+      "category": "documentation",
+      "title": "Documentation overclaims current behavior",
+      "rationale": "The new guide describes hosted policy distribution even though the current implementation only supports local policy pack paths.",
+      "suggestedFix": "Describe hosted distribution as future work or remove the claim.",
+      "anchor": {
+        "path": "docs/guides/policies.md",
+        "startLine": 18,
+        "endLine": null,
+        "side": "new"
+      },
+      "evidenceIds": [
+        "policy:agentic.docs-match-implementation",
+        "diff:file:docs/guides/policies.md"
+      ]
+    }
+  ]
+}

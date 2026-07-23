@@ -13,6 +13,7 @@
     "web:preview": "pnpm --filter @lachesi/web preview",
     "web:deploy": "npx wrangler deploy --config wrangler.web.jsonc",
     "tauri": "tauri",
+    "tui": "cargo run --manifest-path src-tauri/Cargo.toml --bin lachesi-tui",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",

@@ -132,7 +132,7 @@ policy:
     - ./lachesi-policies/agentic-code
   sources:
     - type: adr
-      path: docs/adr
+      path: .docflow/adr
     - type: markdown
       path: docs/review-rules.md
 
@@ -466,7 +466,7 @@ paths:
   include:
     - "src/**"
     - "src-tauri/**"
-    - "docs/adr/**"
+    - ".docflow/adr/**"
   exclude:
     - "**/*.generated.*"
     - "**/*.snap"
@@ -475,7 +475,7 @@ paths:
 policy:
   sources:
     - type: adr
-      path: docs/adr
+      path: .docflow/adr
     - type: markdown
       path: docs/review-policy.md
 
