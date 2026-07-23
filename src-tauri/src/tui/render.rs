@@ -21,6 +21,8 @@ pub struct TuiState<'a> {
     pub drafts: &'a [DraftComment],
     pub composer: Option<&'a str>,
     pub ai_review: Option<&'a AiReviewRunState>,
+    pub ai_review_output: Option<&'a str>,
+    pub detail_view: DetailView,
     pub error: Option<&'a str>,
     pub status: &'a str,
 }
@@ -35,6 +37,12 @@ pub struct DraftComment {
 pub enum FocusPane {
     Repositories,
     PullRequests,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailView {
+    PullRequest,
+    AiReview,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,11 +241,16 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
                 }
             }
             lines.push(Line::from(""));
-            lines.push(Line::from(description_preview(
-                detail.description_raw.as_str(),
-            )));
-            lines.push(Line::from(""));
-            lines.push(Line::from(diff_preview(state.diff)));
+            match state.detail_view {
+                DetailView::PullRequest => {
+                    lines.push(Line::from(description_preview(
+                        detail.description_raw.as_str(),
+                    )));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(diff_preview(state.diff)));
+                }
+                DetailView::AiReview => append_ai_review_output(&mut lines, state.ai_review_output),
+            }
             append_draft_preview(&mut lines, state.drafts);
         }
         None => match state.repos.get(state.selected_repo) {
@@ -296,6 +309,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         Span::raw("p publish  "),
         Span::raw("x discard  "),
         Span::raw("a ai review  "),
+        Span::raw("v view  "),
         Span::raw("g lazygit  "),
         Span::raw("r refresh  "),
         Span::raw(status),
@@ -315,6 +329,17 @@ fn append_draft_preview(lines: &mut Vec<Line<'_>>, drafts: &[DraftComment]) {
             draft.id,
             description_preview(draft.raw.as_str())
         )));
+    }
+}
+
+fn append_ai_review_output(lines: &mut Vec<Line<'_>>, output: Option<&str>) {
+    let Some(output) = output.map(str::trim).filter(|output| !output.is_empty()) else {
+        lines.push(Line::from("No saved AI review output yet."));
+        return;
+    };
+    lines.push(Line::from("AI review output:"));
+    for line in output.lines().take(18) {
+        lines.push(Line::from(line.to_string()));
     }
 }
 
@@ -399,6 +424,8 @@ mod tests {
                         drafts: &[],
                         composer: None,
                         ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::PullRequest,
                         error: None,
                         status: "Ready",
                     },
@@ -452,6 +479,8 @@ mod tests {
                         drafts: &[],
                         composer: None,
                         ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::PullRequest,
                         error: None,
                         status: "Ready",
                     },
@@ -514,6 +543,8 @@ mod tests {
                         }],
                         composer: None,
                         ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::PullRequest,
                         error: None,
                         status: "Loaded",
                     },
@@ -549,6 +580,8 @@ mod tests {
                         drafts: &[],
                         composer: Some("pending thought"),
                         ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::PullRequest,
                         error: None,
                         status: "Composing",
                     },
@@ -618,6 +651,8 @@ mod tests {
             drafts: &[],
             composer: None,
             ai_review: None,
+            ai_review_output: None,
+            detail_view: DetailView::PullRequest,
             error: None,
             status: "Ready",
         };
@@ -630,5 +665,56 @@ mod tests {
             mouse_target(Rect::new(0, 0, 100, 24), 38, 5, state),
             Some(MouseTarget::PullRequest(1))
         );
+    }
+
+    #[test]
+    fn renders_ai_review_output_view() {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let detail = PullRequestDetail {
+            id: 12,
+            title: "Add terminal UI".to_string(),
+            description_raw: "Review in the terminal.".to_string(),
+            state: "OPEN".to_string(),
+            draft: false,
+            author_display_name: "fdg".to_string(),
+            reviewers: Vec::new(),
+            source_branch: "feature/tui".to_string(),
+            destination_branch: "main".to_string(),
+            source_commit_hash: None,
+            destination_commit_hash: None,
+            created_on: String::new(),
+            updated_on: String::new(),
+        };
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::PullRequests,
+                        pull_requests: &[],
+                        selected_pr: 0,
+                        detail: Some(&detail),
+                        comments: &[],
+                        diff: Some("diff --git a/a b/a\n+new\n-old\n"),
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: Some("## Summary\nReview result body."),
+                        detail_view: DetailView::AiReview,
+                        error: None,
+                        status: "Loaded",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("AI review output"));
+        assert!(text.contains("Review result body"));
+        assert!(!text.contains("Diff: 1 files"));
     }
 }

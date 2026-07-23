@@ -13,10 +13,10 @@ use crate::services::bitbucket::{
     ListPrOptions, PrComment, PullRequestDetail, PullRequestSummary,
 };
 use crate::services::review::{
-    get_ai_review_run_state_native, start_inline_review_native, AiReviewRunState,
-    AiReviewRunStatus, AiReviewRunStore,
+    get_ai_review_run_state_native, load_ai_review_store_native, start_inline_review_native,
+    AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
 };
-use render::{mouse_target, render, DraftComment, FocusPane, MouseTarget, TuiState};
+use render::{mouse_target, render, DetailView, DraftComment, FocusPane, MouseTarget, TuiState};
 use terminal::TerminalGuard;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -80,6 +80,8 @@ struct TuiApp {
     ai_review_store: AiReviewRunStore,
     active_ai_target: Option<(String, String, u32)>,
     ai_review_state: Option<AiReviewRunState>,
+    ai_review_output: Option<String>,
+    detail_view: DetailView,
     error: Option<String>,
     status: String,
     should_quit: bool,
@@ -118,6 +120,8 @@ impl TuiApp {
             ai_review_store: AiReviewRunStore::default(),
             active_ai_target: None,
             ai_review_state: None,
+            ai_review_output: None,
+            detail_view: DetailView::PullRequest,
             error: None,
             status: "Ready".to_string(),
             should_quit: false,
@@ -137,6 +141,7 @@ impl TuiApp {
             KeyCode::Char('p') => self.publish_drafts(),
             KeyCode::Char('x') => self.discard_drafts(),
             KeyCode::Char('a') => self.start_ai_review(),
+            KeyCode::Char('v') => self.toggle_detail_view(),
             KeyCode::Char('r') => self.load_selected_repo(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
@@ -291,6 +296,8 @@ impl TuiApp {
                 self.composer = None;
                 self.active_ai_target = None;
                 self.ai_review_state = None;
+                self.ai_review_output = None;
+                self.detail_view = DetailView::PullRequest;
                 self.status = format!("Loaded {} open PRs", self.pull_requests.len());
                 if !self.pull_requests.is_empty() {
                     self.load_selected_pr();
@@ -305,6 +312,8 @@ impl TuiApp {
                 self.composer = None;
                 self.active_ai_target = None;
                 self.ai_review_state = None;
+                self.ai_review_output = None;
+                self.detail_view = DetailView::PullRequest;
                 self.error = Some(error);
                 self.status = "Failed to load PRs".to_string();
             }
@@ -361,6 +370,8 @@ impl TuiApp {
                 self.composer = None;
                 self.active_ai_target = Some((workspace.clone(), repo_name.clone(), pr_id));
                 self.refresh_ai_review_state();
+                self.refresh_ai_review_output();
+                self.detail_view = DetailView::PullRequest;
                 self.status = format!("Loaded PR #{pr_id}");
             }
             Err(error) => {
@@ -371,6 +382,8 @@ impl TuiApp {
                 self.composer = None;
                 self.active_ai_target = None;
                 self.ai_review_state = None;
+                self.ai_review_output = None;
+                self.detail_view = DetailView::PullRequest;
                 self.error = Some(error);
                 self.status = "Failed to load PR detail".to_string();
             }
@@ -493,6 +506,8 @@ impl TuiApp {
             Ok(state) => {
                 self.active_ai_target = Some((workspace, repo, pr_id));
                 self.ai_review_state = Some(state);
+                self.ai_review_output = None;
+                self.detail_view = DetailView::AiReview;
                 self.error = None;
                 self.status = format!("Started {} AI review", ai_provider_label(self.ai_provider));
             }
@@ -500,6 +515,19 @@ impl TuiApp {
                 self.error = Some(error);
                 self.status = "Failed to start AI review".to_string();
             }
+        }
+    }
+
+    fn toggle_detail_view(&mut self) {
+        self.detail_view = match self.detail_view {
+            DetailView::PullRequest => DetailView::AiReview,
+            DetailView::AiReview => DetailView::PullRequest,
+        };
+        if self.detail_view == DetailView::AiReview {
+            self.refresh_ai_review_output();
+            self.status = "Showing AI review output".to_string();
+        } else {
+            self.status = "Showing pull request detail".to_string();
         }
     }
 
@@ -561,6 +589,33 @@ impl TuiApp {
                 AiReviewRunStatus::Cancelled => "AI review cancelled".to_string(),
                 AiReviewRunStatus::Idle => self.status.clone(),
             };
+        }
+        if matches!(
+            self.ai_review_state.as_ref().map(|state| state.status),
+            Some(AiReviewRunStatus::Succeeded)
+        ) {
+            self.refresh_ai_review_output();
+        }
+    }
+
+    fn refresh_ai_review_output(&mut self) {
+        let Some((workspace, repo, pr_id)) = self.active_ai_target.as_ref() else {
+            return;
+        };
+        match load_ai_review_store_native(workspace, repo, *pr_id) {
+            Ok(Some(store)) => {
+                self.ai_review_output = store
+                    .review_runs
+                    .iter()
+                    .rev()
+                    .find_map(|run| run.summary_markdown.clone());
+            }
+            Ok(None) => {
+                self.ai_review_output = None;
+            }
+            Err(error) => {
+                self.error = Some(format!("AI review output failed: {error}"));
+            }
         }
     }
 
@@ -646,6 +701,8 @@ impl TuiApp {
             drafts: &self.drafts,
             composer: self.composer.as_deref(),
             ai_review: self.ai_review_state.as_ref(),
+            ai_review_output: self.ai_review_output.as_deref(),
+            detail_view: self.detail_view,
             error: self.error.as_deref(),
             status: self.status.as_str(),
         }

@@ -64,6 +64,20 @@ This is the shared, committed review configuration. It owns:
 - publish defaults
 - future CLI/headless defaults that should be shared by the team
 
+### Repo policy folder: `.lachesi/`
+
+Location: repository root.
+
+This optional folder is a lighter-weight committed review configuration. Lachesi
+uses it only when `.lachesi.yaml` is absent. It owns:
+
+- `system-prompt.md`, `review-prompt.md`, `review.md`, or `prompt.md` as a
+  repository-owned review prompt extension, checked in priority order
+- `packs/*/pack.yaml` policy packs loaded as local policy packs
+
+If both `.lachesi.yaml` and `.lachesi/` exist, `.lachesi.yaml` is the explicit
+configuration source and wins.
+
 ### Local repo override: `.lachesi.local.yaml`
 
 Location: repository root, ignored by git.
@@ -84,7 +98,7 @@ When resolving review behavior, Lachesi applies configuration in this order:
 
 1. built-in app defaults
 2. app-level local `settings.json`
-3. repo-owned `.lachesi.yaml`
+3. repo-owned `.lachesi.yaml`, or `.lachesi/` when `.lachesi.yaml` is absent
 4. local non-committed `.lachesi.local.yaml`
 5. ad hoc prompt/session overrides
 

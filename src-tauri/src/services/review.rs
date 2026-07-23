@@ -4736,7 +4736,15 @@ pub fn load_ai_review_store(
     repo: String,
     id: u32,
 ) -> Result<Option<AiReviewStoreData>, String> {
-    load_review_store(&workspace, &repo, id)
+    load_ai_review_store_native(&workspace, &repo, id)
+}
+
+pub fn load_ai_review_store_native(
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Result<Option<AiReviewStoreData>, String> {
+    load_review_store(workspace, repo, id)
 }
 
 #[allow(clippy::too_many_arguments)]

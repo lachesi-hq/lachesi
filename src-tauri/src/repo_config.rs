@@ -325,6 +325,9 @@ pub fn load_from_repo_path_with_profile(
 
     let config_path = repo_path.join(CONFIG_FILE);
     if !config_path.exists() {
+        if let Some(result) = load_from_lachesi_dir(repo_path, profile_override)? {
+            return Ok(result);
+        }
         return Ok(RepoReviewConfigLoadResult {
             repo_path: repo_path.display().to_string(),
             config_path: config_path.display().to_string(),
@@ -345,6 +348,88 @@ pub fn load_from_repo_path_with_profile(
         &contents,
         profile_override,
     ))
+}
+
+fn load_from_lachesi_dir(
+    repo_path: &Path,
+    profile_override: Option<&str>,
+) -> Result<Option<RepoReviewConfigLoadResult>, String> {
+    let lachesi_dir = repo_path.join(".lachesi");
+    if !lachesi_dir.is_dir() {
+        return Ok(None);
+    }
+
+    let mut config = RepoReviewConfig {
+        version: SUPPORTED_VERSION.to_string(),
+        ..RepoReviewConfig::default()
+    };
+
+    if let Some(prompt) = load_lachesi_dir_prompt(&lachesi_dir)? {
+        config.review = Some(ReviewConfig {
+            prompt: Some(PromptConfig {
+                extend: Some(prompt),
+            }),
+            ..ReviewConfig::default()
+        });
+    }
+
+    let packs = discover_lachesi_dir_policy_packs(repo_path)?;
+    if !packs.is_empty() {
+        config.policy = Some(PolicyConfig {
+            packs,
+            ..PolicyConfig::default()
+        });
+    }
+
+    let contents = serde_yaml::to_string(&config)
+        .map_err(|error| format!("Failed to synthesize .lachesi config: {error}"))?;
+    Ok(Some(load_from_str(
+        repo_path,
+        &lachesi_dir,
+        &contents,
+        profile_override,
+    )))
+}
+
+fn load_lachesi_dir_prompt(lachesi_dir: &Path) -> Result<Option<String>, String> {
+    for file_name in [
+        "system-prompt.md",
+        "review-prompt.md",
+        "review.md",
+        "prompt.md",
+    ] {
+        let path = lachesi_dir.join(file_name);
+        if path.is_file() {
+            let prompt = fs::read_to_string(&path)
+                .map_err(|error| format!("Failed to read {}: {error}", path.display()))?
+                .trim()
+                .to_string();
+            if !prompt.is_empty() {
+                return Ok(Some(prompt));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn discover_lachesi_dir_policy_packs(repo_path: &Path) -> Result<Vec<String>, String> {
+    let packs_dir = repo_path.join(".lachesi/packs");
+    if !packs_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut packs = Vec::new();
+    for entry in fs::read_dir(&packs_dir)
+        .map_err(|error| format!("Failed to read {}: {error}", packs_dir.display()))?
+    {
+        let entry = entry.map_err(|error| format!("Failed to inspect policy pack: {error}"))?;
+        let path = entry.path();
+        if resolve_pack_manifest_path(repo_path, &path.to_string_lossy()).is_some() {
+            packs.push(path.to_string_lossy().to_string());
+        }
+    }
+    packs.sort();
+    Ok(packs)
 }
 
 fn load_from_str(
@@ -1337,6 +1422,54 @@ policy:
         assert!(result.warnings.is_empty());
         assert_eq!(result.loaded_policy_packs[0].id, "react-saas");
         assert_eq!(result.config.unwrap().policy.unwrap().rules.len(), 1);
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn loads_implicit_lachesi_folder_prompt_and_policy_packs() {
+        let repo = temp_repo();
+        let lachesi_dir = repo.join(".lachesi");
+        let pack_dir = lachesi_dir.join("packs/team-rules");
+        fs::create_dir_all(&pack_dir).expect("create pack dir");
+        fs::write(
+            lachesi_dir.join("system-prompt.md"),
+            "Repository system prompt.",
+        )
+        .expect("write prompt");
+        fs::write(
+            pack_dir.join("pack.yaml"),
+            r#"
+id: team-rules
+review:
+  prompt:
+    extend: Pack prompt.
+policy:
+  rules:
+    - id: team.boundary
+      severity: high
+      instruction: Keep provider calls behind native services.
+"#,
+        )
+        .expect("write pack");
+
+        let result = load_from_repo_path(&repo).expect("load result");
+
+        assert!(result.exists);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        assert_eq!(result.config_path, lachesi_dir.to_string_lossy());
+        assert_eq!(result.loaded_policy_packs.len(), 1);
+        assert_eq!(result.loaded_policy_packs[0].id, "team-rules");
+
+        let config = result.config.expect("config");
+        let prompt = config
+            .review
+            .as_ref()
+            .and_then(|review| review.prompt.as_ref())
+            .and_then(|prompt| prompt.extend.as_deref())
+            .expect("prompt");
+        assert_eq!(prompt, "Pack prompt.\n\nRepository system prompt.");
+        assert_eq!(config.policy.expect("policy").rules.len(), 1);
         let _ = fs::remove_dir_all(repo);
     }
 
