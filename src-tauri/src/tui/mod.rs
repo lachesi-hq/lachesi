@@ -182,6 +182,7 @@ impl TuiApp {
                 match mouse_target(area, mouse.column, mouse.row, self.view_state()) {
                     Some(MouseTarget::Repository(index)) => self.select_repo(index),
                     Some(MouseTarget::PullRequest(index)) => self.select_pr(index),
+                    Some(MouseTarget::PrFilter(filter)) => self.set_pr_filter(filter),
                     None => {
                         if let Some(view) = detail_view_target(area, mouse.column, mouse.row) {
                             self.detail_view = view;
@@ -290,7 +291,15 @@ impl TuiApp {
     }
 
     fn cycle_pr_filter(&mut self) {
-        self.pr_filter = self.pr_filter.next();
+        self.set_pr_filter(self.pr_filter.next());
+    }
+
+    fn set_pr_filter(&mut self, filter: PrListFilter) {
+        if self.pr_filter == filter {
+            self.status = format!("Showing {} PRs", self.pr_filter.label());
+            return;
+        }
+        self.pr_filter = filter;
         self.selected_pr = 0;
         self.load_selected_repo();
     }
@@ -1308,6 +1317,23 @@ mod tests {
 
         app.handle_key(KeyCode::Char('f'));
         assert_eq!(app.pr_filter, PrListFilter::Open);
+    }
+
+    #[test]
+    fn mouse_click_sets_pull_request_filter() {
+        let mut app = TuiApp::from_repos(Vec::new());
+
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 14,
+                row: 19,
+                modifiers: event::KeyModifiers::empty(),
+            },
+            ratatui::layout::Rect::new(0, 0, 100, 24),
+        );
+
+        assert_eq!(app.pr_filter, PrListFilter::Draft);
     }
 
     #[test]

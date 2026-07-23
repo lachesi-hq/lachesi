@@ -97,6 +97,7 @@ impl PrListFilter {
 pub enum MouseTarget {
     Repository(usize),
     PullRequest(usize),
+    PrFilter(PrListFilter),
 }
 
 const SURFACE: Color = Color::Rgb(13, 17, 23);
@@ -118,11 +119,11 @@ pub fn render(frame: &mut Frame<'_>, state: TuiState<'_>) {
 
     render_header(frame, header);
 
-    let [repos, review] = *body_areas().split(body) else {
+    let [left, review] = *body_areas().split(body) else {
         return;
     };
 
-    render_repos(frame, repos, state);
+    render_left_panel(frame, left, state);
     render_review(frame, review, state);
     render_footer(frame, footer, state.status);
 }
@@ -131,11 +132,17 @@ pub fn mouse_target(area: Rect, x: u16, y: u16, state: TuiState<'_>) -> Option<M
     let [_, body, _] = *vertical_areas().split(area) else {
         return None;
     };
-    let [repos, review] = *body_areas().split(body) else {
+    let [left, review] = *body_areas().split(body) else {
+        return None;
+    };
+    let [repos, filters] = *left_areas().split(left) else {
         return None;
     };
     if let Some(index) = list_index_at(repos, x, y, state.repos.len()) {
         return Some(MouseTarget::Repository(index));
+    }
+    if let Some(filter) = pr_filter_at(filters, x, y) {
+        return Some(MouseTarget::PrFilter(filter));
     }
 
     let [pr_list, _] = *review_areas().split(review) else {
@@ -182,6 +189,12 @@ fn body_areas() -> Layout {
         .constraints([Constraint::Percentage(28), Constraint::Percentage(72)])
 }
 
+fn left_areas() -> Layout {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(8), Constraint::Length(4)])
+}
+
 fn review_areas() -> Layout {
     Layout::default()
         .direction(Direction::Vertical)
@@ -214,6 +227,26 @@ fn list_index_at(area: Rect, x: u16, y: u16, len: usize) -> Option<usize> {
     (index < len).then_some(index)
 }
 
+fn pr_filter_at(area: Rect, x: u16, y: u16) -> Option<PrListFilter> {
+    if area.width < 3 || area.height < 3 {
+        return None;
+    }
+    let inner_x_start = area.x.saturating_add(1);
+    let inner_x_end = area.x.saturating_add(area.width.saturating_sub(1));
+    let inner_y = area.y.saturating_add(1)..area.y.saturating_add(area.height.saturating_sub(1));
+    if x < inner_x_start || x >= inner_x_end || !inner_y.contains(&y) {
+        return None;
+    }
+    let width = inner_x_end.saturating_sub(inner_x_start).max(1);
+    let relative_x = x.saturating_sub(inner_x_start);
+    let segment = (u32::from(relative_x) * 3 / u32::from(width)).min(2);
+    match segment {
+        0 => Some(PrListFilter::Open),
+        1 => Some(PrListFilter::Draft),
+        _ => Some(PrListFilter::Merged),
+    }
+}
+
 fn render_header(frame: &mut Frame<'_>, area: Rect) {
     let header = Paragraph::new(Line::from(vec![
         Span::styled("Lachesi", accent_style().add_modifier(Modifier::BOLD)),
@@ -226,6 +259,14 @@ fn render_header(frame: &mut Frame<'_>, area: Rect) {
             .border_style(border_style()),
     );
     frame.render_widget(header, area);
+}
+
+fn render_left_panel(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
+    let [repos, filters] = *left_areas().split(area) else {
+        return;
+    };
+    render_repos(frame, repos, state);
+    render_pr_filters(frame, filters, state.pr_filter);
 }
 
 fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
@@ -271,6 +312,32 @@ fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
         .style(panel_style())
         .block(panel_block(title, state.focus == FocusPane::Repositories));
     frame.render_widget(list, area);
+}
+
+fn render_pr_filters(frame: &mut Frame<'_>, area: Rect, selected_filter: PrListFilter) {
+    let filters = [
+        (PrListFilter::Open, "Open"),
+        (PrListFilter::Draft, "Draft"),
+        (PrListFilter::Merged, "Merged"),
+    ];
+    let mut spans = Vec::new();
+    for (index, (filter, label)) in filters.into_iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled("  ", muted_style()));
+        }
+        if filter == selected_filter {
+            spans.push(Span::styled(
+                format!("[{label}]"),
+                accent_style().add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(format!(" {label} "), text_style()));
+        }
+    }
+    let filters = Paragraph::new(Line::from(spans))
+        .style(panel_style())
+        .block(panel_block("PR filter", false));
+    frame.render_widget(filters, area);
 }
 
 fn render_review(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
@@ -327,7 +394,11 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
             })
             .collect()
     };
-    let title = pull_requests_title(state.pr_filter, state.focus == FocusPane::PullRequests);
+    let title = if state.focus == FocusPane::PullRequests {
+        "Pull requests *"
+    } else {
+        "Pull requests"
+    };
     let list = List::new(items)
         .style(panel_style())
         .block(panel_block(title, state.focus == FocusPane::PullRequests));
@@ -553,17 +624,6 @@ fn pr_review_marker(running: bool, reviewed: bool) -> Span<'static> {
         return Span::styled("[AI] ", success_style().add_modifier(Modifier::BOLD));
     }
     Span::styled("[--] ", muted_style())
-}
-
-fn pull_requests_title(filter: PrListFilter, active: bool) -> &'static str {
-    match (filter, active) {
-        (PrListFilter::Open, true) => "Pull requests: Open *",
-        (PrListFilter::Open, false) => "Pull requests: Open",
-        (PrListFilter::Draft, true) => "Pull requests: Drafts *",
-        (PrListFilter::Draft, false) => "Pull requests: Drafts",
-        (PrListFilter::Merged, true) => "Pull requests: Merged *",
-        (PrListFilter::Merged, false) => "Pull requests: Merged",
-    }
 }
 
 fn author_label(author: &str) -> &str {
@@ -953,7 +1013,8 @@ mod tests {
         let text = buffer_text(&terminal);
         assert!(text.contains("github lachesi-hq/lachesi"));
         assert!(text.contains("/tmp/lachesi"));
-        assert!(text.contains("Pull requests: Open *"));
+        assert!(text.contains("PR filter"));
+        assert!(text.contains("[Open]"));
         assert!(text.contains("#12 feature/tui -> main"));
         assert!(text.contains("by fdg"));
     }
@@ -1229,6 +1290,45 @@ mod tests {
         assert_eq!(
             mouse_target(Rect::new(0, 0, 100, 24), 38, 5, state),
             Some(MouseTarget::PullRequest(1))
+        );
+    }
+
+    #[test]
+    fn maps_mouse_clicks_to_pull_request_filter_segments() {
+        let state = TuiState {
+            repos: &[],
+            selected_repo: 0,
+            focus: FocusPane::Repositories,
+            pull_requests: &[],
+            pr_filter: PrListFilter::Open,
+            selected_pr: 0,
+            detail: None,
+            comments: &[],
+            ai_reviewed_pr_ids: &[],
+            ai_review_running_pr_ids: &[],
+            diff: None,
+            drafts: &[],
+            composer: None,
+            ai_review: None,
+            ai_review_output: None,
+            detail_view: DetailView::PullRequest,
+            detail_scroll: 0,
+            ai_review_scroll: 0,
+            error: None,
+            status: "Ready",
+        };
+
+        assert_eq!(
+            mouse_target(Rect::new(0, 0, 100, 24), 2, 19, state),
+            Some(MouseTarget::PrFilter(PrListFilter::Open))
+        );
+        assert_eq!(
+            mouse_target(Rect::new(0, 0, 100, 24), 14, 19, state),
+            Some(MouseTarget::PrFilter(PrListFilter::Draft))
+        );
+        assert_eq!(
+            mouse_target(Rect::new(0, 0, 100, 24), 26, 19, state),
+            Some(MouseTarget::PrFilter(PrListFilter::Merged))
         );
     }
 
