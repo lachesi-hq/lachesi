@@ -72,6 +72,7 @@ struct TuiApp {
     detail: Option<PullRequestDetail>,
     comments: Vec<PrComment>,
     ai_reviewed_pr_ids: Vec<u32>,
+    ai_review_running_pr_ids: Vec<u32>,
     diff: Option<String>,
     drafts: Vec<DraftComment>,
     composer: Option<String>,
@@ -115,6 +116,7 @@ impl TuiApp {
             detail: None,
             comments: Vec::new(),
             ai_reviewed_pr_ids: Vec::new(),
+            ai_review_running_pr_ids: Vec::new(),
             diff: None,
             drafts: Vec::new(),
             composer: None,
@@ -151,6 +153,7 @@ impl TuiApp {
             KeyCode::Char('x') => self.discard_drafts(),
             KeyCode::Char('a') => self.start_ai_review(),
             KeyCode::Char('v') => self.toggle_detail_view(),
+            KeyCode::Char('y') => self.copy_ai_review_output(),
             KeyCode::Char('r') => self.load_selected_repo(),
             KeyCode::PageUp => self.scroll_active_detail(-10),
             KeyCode::PageDown => self.scroll_active_detail(10),
@@ -289,6 +292,7 @@ impl TuiApp {
             self.detail = None;
             self.comments.clear();
             self.ai_reviewed_pr_ids.clear();
+            self.ai_review_running_pr_ids.clear();
             self.diff = None;
             self.drafts.clear();
             self.composer = None;
@@ -326,6 +330,7 @@ impl TuiApp {
                 self.ai_review_output = None;
                 self.detail_view = DetailView::PullRequest;
                 self.reset_detail_scrolls();
+                self.ai_review_running_pr_ids.clear();
                 self.refresh_ai_review_markers(workspace.as_str(), repo_name.as_str());
                 self.status = format!("Loaded {} open PRs", self.pull_requests.len());
                 if !self.pull_requests.is_empty() {
@@ -337,6 +342,7 @@ impl TuiApp {
                 self.detail = None;
                 self.comments.clear();
                 self.ai_reviewed_pr_ids.clear();
+                self.ai_review_running_pr_ids.clear();
                 self.diff = None;
                 self.drafts.clear();
                 self.composer = None;
@@ -540,6 +546,7 @@ impl TuiApp {
                 self.active_ai_target = Some((workspace, repo, pr_id));
                 self.ai_review_state = Some(state);
                 self.ai_review_output = None;
+                self.mark_ai_review_running(pr_id);
                 self.detail_view = DetailView::AiReview;
                 self.ai_review_scroll = 0;
                 self.error = None;
@@ -604,6 +611,38 @@ impl TuiApp {
         self.ai_review_scroll = 0;
     }
 
+    fn copy_ai_review_output(&mut self) {
+        self.refresh_ai_review_output();
+        self.copy_loaded_ai_review_output_with(|output| {
+            terminal::copy_to_clipboard(output).map_err(|error| error.to_string())
+        });
+    }
+
+    fn copy_loaded_ai_review_output_with(
+        &mut self,
+        copier: impl FnOnce(&str) -> Result<(), String>,
+    ) {
+        let Some(output) = self
+            .ai_review_output
+            .as_deref()
+            .map(str::trim)
+            .filter(|output| !output.is_empty())
+        else {
+            self.status = "No AI review output to copy".to_string();
+            return;
+        };
+        match copier(output) {
+            Ok(()) => {
+                self.status = "Copied AI review output".to_string();
+                self.error = None;
+            }
+            Err(error) => {
+                self.status = "Failed to copy AI review output".to_string();
+                self.error = Some(error);
+            }
+        }
+    }
+
     fn review_prompt_for_selected_repo(&self) -> Result<String, String> {
         let Some(repo) = self.repos.get(self.selected_repo) else {
             return Ok(default_review_prompt());
@@ -651,14 +690,20 @@ impl TuiApp {
         let Some((workspace, repo, pr_id)) = self.active_ai_target.as_ref() else {
             return;
         };
+        let active_pr_id = *pr_id;
         self.ai_review_state =
-            get_ai_review_run_state_native(&self.ai_review_store, workspace, repo, *pr_id);
-        if let Some(state) = self.ai_review_state.as_ref() {
-            self.status = match state.status {
+            get_ai_review_run_state_native(&self.ai_review_store, workspace, repo, active_pr_id);
+        let current = self
+            .ai_review_state
+            .as_ref()
+            .map(|state| (state.status, state.logs.last().cloned()));
+        if let Some((status, latest_log)) = current {
+            self.status = match status {
                 AiReviewRunStatus::Running => {
+                    self.mark_ai_review_running(active_pr_id);
                     format!(
                         "AI review running: {}",
-                        state.logs.last().map(String::as_str).unwrap_or("started")
+                        latest_log.as_deref().unwrap_or("started")
                     )
                 }
                 AiReviewRunStatus::Succeeded => "AI review completed".to_string(),
@@ -671,10 +716,14 @@ impl TuiApp {
             self.ai_review_state.as_ref().map(|state| state.status),
             Some(AiReviewRunStatus::Succeeded)
         ) {
-            if let Some((_, _, pr_id)) = self.active_ai_target.as_ref() {
-                self.mark_ai_reviewed(*pr_id);
-            }
+            self.unmark_ai_review_running(active_pr_id);
+            self.mark_ai_reviewed(active_pr_id);
             self.refresh_ai_review_output();
+        } else if matches!(
+            self.ai_review_state.as_ref().map(|state| state.status),
+            Some(AiReviewRunStatus::Failed | AiReviewRunStatus::Cancelled)
+        ) {
+            self.unmark_ai_review_running(active_pr_id);
         }
     }
 
@@ -695,6 +744,16 @@ impl TuiApp {
         if !self.ai_reviewed_pr_ids.contains(&pr_id) {
             self.ai_reviewed_pr_ids.push(pr_id);
         }
+    }
+
+    fn mark_ai_review_running(&mut self, pr_id: u32) {
+        if !self.ai_review_running_pr_ids.contains(&pr_id) {
+            self.ai_review_running_pr_ids.push(pr_id);
+        }
+    }
+
+    fn unmark_ai_review_running(&mut self, pr_id: u32) {
+        self.ai_review_running_pr_ids.retain(|id| *id != pr_id);
     }
 
     fn refresh_ai_review_output(&mut self) {
@@ -797,6 +856,7 @@ impl TuiApp {
             detail: self.detail.as_ref(),
             comments: &self.comments,
             ai_reviewed_pr_ids: &self.ai_reviewed_pr_ids,
+            ai_review_running_pr_ids: &self.ai_review_running_pr_ids,
             diff: self.diff.as_deref(),
             drafts: &self.drafts,
             composer: self.composer.as_deref(),
@@ -967,6 +1027,46 @@ mod tests {
         );
         assert_eq!(app.detail_view, DetailView::AiReview);
         assert_eq!(app.ai_review_scroll, 3);
+    }
+
+    #[test]
+    fn running_review_marker_is_removed_when_review_finishes() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+
+        app.mark_ai_review_running(7);
+        assert_eq!(app.ai_review_running_pr_ids, vec![7]);
+
+        app.mark_ai_reviewed(7);
+        app.unmark_ai_review_running(7);
+
+        assert!(app.ai_review_running_pr_ids.is_empty());
+        assert_eq!(app.ai_reviewed_pr_ids, vec![7]);
+    }
+
+    #[test]
+    fn copies_loaded_ai_review_output_without_visible_wrapping() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.ai_review_output = Some("full markdown\nwith second line".to_string());
+        let mut copied = String::new();
+
+        app.copy_loaded_ai_review_output_with(|output| {
+            copied = output.to_string();
+            Ok(())
+        });
+
+        assert_eq!(copied, "full markdown\nwith second line");
+        assert_eq!(app.status, "Copied AI review output");
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn copy_review_reports_missing_output() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+
+        app.copy_loaded_ai_review_output_with(|_| Err("should not copy".to_string()));
+
+        assert_eq!(app.status, "No AI review output to copy");
+        assert!(app.error.is_none());
     }
 
     #[test]

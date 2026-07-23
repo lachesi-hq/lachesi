@@ -22,6 +22,7 @@ pub struct TuiState<'a> {
     pub detail: Option<&'a PullRequestDetail>,
     pub comments: &'a [PrComment],
     pub ai_reviewed_pr_ids: &'a [u32],
+    pub ai_review_running_pr_ids: &'a [u32],
     pub diff: Option<&'a str>,
     pub drafts: &'a [DraftComment],
     pub composer: Option<&'a str>,
@@ -251,6 +252,7 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
             .map(|(index, pr)| {
                 let selected = index == state.selected_pr;
                 let reviewed = state.ai_reviewed_pr_ids.contains(&pr.id);
+                let running = state.ai_review_running_pr_ids.contains(&pr.id);
                 let marker = if selected { ">" } else { " " };
                 ListItem::new(Line::from(vec![
                     Span::styled(
@@ -262,14 +264,7 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
                         },
                     ),
                     Span::raw(" "),
-                    Span::styled(
-                        if reviewed { "[AI] " } else { "[--] " },
-                        if reviewed {
-                            success_style().add_modifier(Modifier::BOLD)
-                        } else {
-                            muted_style()
-                        },
-                    ),
+                    pr_review_marker(running, reviewed),
                     Span::styled(format!("#{} ", pr.id), info_style()),
                     Span::styled(pr.source_branch.clone(), branch_style()),
                     Span::styled(" -> ", muted_style()),
@@ -472,6 +467,8 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         Span::styled(" ai review  ", muted_style()),
         Span::styled("v", accent_style()),
         Span::styled(" pane  ", muted_style()),
+        Span::styled("y", accent_style()),
+        Span::styled(" copy review  ", muted_style()),
         Span::styled("PgUp/PgDn", accent_style()),
         Span::styled(" scroll  ", muted_style()),
         Span::styled("g", accent_style()),
@@ -496,6 +493,16 @@ fn append_draft_preview(lines: &mut Vec<Line<'_>>, drafts: &[DraftComment]) {
             Span::styled(description_preview(draft.raw.as_str()), text_style()),
         ]));
     }
+}
+
+fn pr_review_marker(running: bool, reviewed: bool) -> Span<'static> {
+    if running {
+        return Span::styled("[RUN] ", accent_style().add_modifier(Modifier::BOLD));
+    }
+    if reviewed {
+        return Span::styled("[AI] ", success_style().add_modifier(Modifier::BOLD));
+    }
+    Span::styled("[--] ", muted_style())
 }
 
 fn append_ai_review_output(lines: &mut Vec<Line<'_>>, output: Option<&str>, width: usize) {
@@ -796,6 +803,7 @@ mod tests {
                         detail: None,
                         comments: &[],
                         ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
                         diff: None,
                         drafts: &[],
                         composer: None,
@@ -854,6 +862,7 @@ mod tests {
                         detail: None,
                         comments: &[],
                         ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
                         diff: None,
                         drafts: &[],
                         composer: None,
@@ -908,6 +917,20 @@ mod tests {
                 updated_on: String::new(),
                 reviewers: Vec::new(),
             },
+            PullRequestSummary {
+                id: 14,
+                title: "Running".to_string(),
+                author_display_name: String::new(),
+                author_account_id: None,
+                source_branch: "feature/running".to_string(),
+                destination_branch: "main".to_string(),
+                state: "OPEN".to_string(),
+                draft: false,
+                comment_count: 0,
+                created_on: String::new(),
+                updated_on: String::new(),
+                reviewers: Vec::new(),
+            },
         ];
 
         terminal
@@ -923,6 +946,7 @@ mod tests {
                         detail: None,
                         comments: &[],
                         ai_reviewed_pr_ids: &[12],
+                        ai_review_running_pr_ids: &[14],
                         diff: None,
                         drafts: &[],
                         composer: None,
@@ -941,6 +965,7 @@ mod tests {
         let text = buffer_text(&terminal);
         assert!(text.contains("[AI] #12"));
         assert!(text.contains("[--] #13"));
+        assert!(text.contains("[RUN] #14"));
     }
 
     #[test]
@@ -986,6 +1011,7 @@ mod tests {
                         detail: Some(&detail),
                         comments: &comments,
                         ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
                         diff: Some("diff --git a/a b/a\n+new\n-old\n"),
                         drafts: &[DraftComment {
                             id: 1,
@@ -1029,6 +1055,7 @@ mod tests {
                         detail: None,
                         comments: &[],
                         ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
                         diff: None,
                         drafts: &[],
                         composer: Some("pending thought"),
@@ -1103,6 +1130,7 @@ mod tests {
             detail: None,
             comments: &[],
             ai_reviewed_pr_ids: &[],
+            ai_review_running_pr_ids: &[],
             diff: None,
             drafts: &[],
             composer: None,
@@ -1158,6 +1186,7 @@ mod tests {
                         detail: Some(&detail),
                         comments: &[],
                         ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
                         diff: Some("diff --git a/a b/a\n+new\n-old\n"),
                         drafts: &[],
                         composer: None,
@@ -1217,6 +1246,7 @@ mod tests {
                         detail: Some(&detail),
                         comments: &[],
                         ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
                         diff: Some("diff --git a/a b/a\n+new\n-old\n"),
                         drafts: &[],
                         composer: None,
@@ -1272,6 +1302,7 @@ mod tests {
                         detail: Some(&detail),
                         comments: &[],
                         ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
                         diff: Some("diff --git a/a b/a\n+new\n-old\n"),
                         drafts: &[],
                         composer: None,
@@ -1330,6 +1361,7 @@ mod tests {
                         detail: Some(&detail),
                         comments: &[],
                         ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
                         diff: None,
                         drafts: &[],
                         composer: None,

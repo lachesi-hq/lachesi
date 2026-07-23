@@ -11,6 +11,7 @@ use crossterm::{
     cursor::{Hide, Show},
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
+    style::Print,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
@@ -111,4 +112,51 @@ fn restore_terminal() -> io::Result<()> {
         LeaveAlternateScreen,
         DisableMouseCapture
     )
+}
+
+pub fn copy_to_clipboard(text: &str) -> io::Result<()> {
+    execute!(io::stdout(), Print(osc52_sequence(text)))?;
+    Ok(())
+}
+
+fn osc52_sequence(text: &str) -> String {
+    format!("\x1b]52;c;{}\x07", base64_encode(text.as_bytes()))
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        let packed = ((first as u32) << 16) | ((second as u32) << 8) | third as u32;
+
+        output.push(TABLE[((packed >> 18) & 0x3f) as usize] as char);
+        output.push(TABLE[((packed >> 12) & 0x3f) as usize] as char);
+        if chunk.len() > 1 {
+            output.push(TABLE[((packed >> 6) & 0x3f) as usize] as char);
+        } else {
+            output.push('=');
+        }
+        if chunk.len() > 2 {
+            output.push(TABLE[(packed & 0x3f) as usize] as char);
+        } else {
+            output.push('=');
+        }
+    }
+
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{base64_encode, osc52_sequence};
+
+    #[test]
+    fn encodes_clipboard_payload_for_osc52() {
+        assert_eq!(base64_encode(b"AI review"), "QUkgcmV2aWV3");
+        assert_eq!(osc52_sequence("ok"), "\x1b]52;c;b2s=\x07");
+    }
 }
