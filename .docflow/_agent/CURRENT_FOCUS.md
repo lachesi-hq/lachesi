@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`8def318` - repository-owned prompt replacement for AI review.
+`128166c` - scrollable terminal review panes and accent styling.
 
 ## Next item
 
