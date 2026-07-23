@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`6a07e25` - terminal UI foundation branch validation fix.
+`2eedb4b` - terminal UI mouse, GitHub, and AI review controls.
 
 ## Next item
 
