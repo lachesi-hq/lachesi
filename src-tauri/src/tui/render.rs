@@ -18,6 +18,7 @@ pub struct TuiState<'a> {
     pub selected_repo: usize,
     pub focus: FocusPane,
     pub pull_requests: &'a [PullRequestSummary],
+    pub pr_filter: PrListFilter,
     pub selected_pr: usize,
     pub detail: Option<&'a PullRequestDetail>,
     pub comments: &'a [PrComment],
@@ -51,6 +52,45 @@ pub enum FocusPane {
 pub enum DetailView {
     PullRequest,
     AiReview,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrListFilter {
+    Open,
+    Draft,
+    Merged,
+}
+
+impl PrListFilter {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Open => Self::Draft,
+            Self::Draft => Self::Merged,
+            Self::Merged => Self::Open,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Draft => "draft",
+            Self::Merged => "merged",
+        }
+    }
+
+    pub fn provider_state(self) -> &'static str {
+        match self {
+            Self::Open | Self::Draft => "OPEN",
+            Self::Merged => "MERGED",
+        }
+    }
+
+    pub fn includes(self, pr: &PullRequestSummary) -> bool {
+        match self {
+            Self::Open | Self::Merged => true,
+            Self::Draft => pr.draft,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,7 +283,10 @@ fn render_review(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
 
 fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     let items = if state.pull_requests.is_empty() {
-        vec![ListItem::new("No open pull requests loaded")]
+        vec![ListItem::new(format!(
+            "No {} pull requests loaded",
+            state.pr_filter.label()
+        ))]
     } else {
         state
             .pull_requests
@@ -278,15 +321,13 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
                             text_style()
                         },
                     ),
+                    Span::styled("  by ", muted_style()),
+                    Span::styled(author_label(pr.author_display_name.as_str()), text_style()),
                 ]))
             })
             .collect()
     };
-    let title = if state.focus == FocusPane::PullRequests {
-        "Pull requests *"
-    } else {
-        "Pull requests"
-    };
+    let title = pull_requests_title(state.pr_filter, state.focus == FocusPane::PullRequests);
     let list = List::new(items)
         .style(panel_style())
         .block(panel_block(title, state.focus == FocusPane::PullRequests));
@@ -332,6 +373,13 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
                 Span::styled(detail.state.as_str(), status_style(detail.state.as_str())),
                 Span::styled(" | ", muted_style()),
                 Span::styled(format!("{} comments", state.comments.len()), text_style()),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("Author: ", muted_style()),
+                Span::styled(
+                    author_label(detail.author_display_name.as_str()),
+                    text_style(),
+                ),
             ]));
             lines.push(Line::from(vec![
                 Span::styled("Drafts: ", muted_style()),
@@ -465,6 +513,8 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         Span::styled(" discard  ", muted_style()),
         Span::styled("a", accent_style()),
         Span::styled(" ai review  ", muted_style()),
+        Span::styled("f", accent_style()),
+        Span::styled(" filter  ", muted_style()),
         Span::styled("v", accent_style()),
         Span::styled(" pane  ", muted_style()),
         Span::styled("y", accent_style()),
@@ -503,6 +553,26 @@ fn pr_review_marker(running: bool, reviewed: bool) -> Span<'static> {
         return Span::styled("[AI] ", success_style().add_modifier(Modifier::BOLD));
     }
     Span::styled("[--] ", muted_style())
+}
+
+fn pull_requests_title(filter: PrListFilter, active: bool) -> &'static str {
+    match (filter, active) {
+        (PrListFilter::Open, true) => "Pull requests: Open *",
+        (PrListFilter::Open, false) => "Pull requests: Open",
+        (PrListFilter::Draft, true) => "Pull requests: Drafts *",
+        (PrListFilter::Draft, false) => "Pull requests: Drafts",
+        (PrListFilter::Merged, true) => "Pull requests: Merged *",
+        (PrListFilter::Merged, false) => "Pull requests: Merged",
+    }
+}
+
+fn author_label(author: &str) -> &str {
+    let author = author.trim();
+    if author.is_empty() {
+        "unknown"
+    } else {
+        author
+    }
 }
 
 fn append_ai_review_output(lines: &mut Vec<Line<'_>>, output: Option<&str>, width: usize) {
@@ -799,6 +869,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::Repositories,
                         pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,
                         comments: &[],
@@ -858,6 +929,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &pull_requests,
+                        pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,
                         comments: &[],
@@ -881,7 +953,9 @@ mod tests {
         let text = buffer_text(&terminal);
         assert!(text.contains("github lachesi-hq/lachesi"));
         assert!(text.contains("/tmp/lachesi"));
+        assert!(text.contains("Pull requests: Open *"));
         assert!(text.contains("#12 feature/tui -> main"));
+        assert!(text.contains("by fdg"));
     }
 
     #[test]
@@ -942,6 +1016,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &pull_requests,
+                        pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,
                         comments: &[],
@@ -1007,6 +1082,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
                         comments: &comments,
@@ -1032,6 +1108,7 @@ mod tests {
 
         let text = buffer_text(&terminal);
         assert!(text.contains("#12 Add terminal UI"));
+        assert!(text.contains("Author: fdg"));
         assert!(text.contains("1 comments"));
         assert!(text.contains("Drafts: 1 pending"));
         assert!(text.contains("Diff: 1 files, +1/-1"));
@@ -1051,6 +1128,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,
                         comments: &[],
@@ -1126,6 +1204,7 @@ mod tests {
             selected_repo: 0,
             focus: FocusPane::Repositories,
             pull_requests: &pull_requests,
+            pr_filter: PrListFilter::Open,
             selected_pr: 0,
             detail: None,
             comments: &[],
@@ -1182,6 +1261,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
                         comments: &[],
@@ -1242,6 +1322,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
                         comments: &[],
@@ -1298,6 +1379,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
                         comments: &[],
@@ -1357,6 +1439,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
                         comments: &[],

@@ -18,7 +18,7 @@ use crate::services::review::{
 };
 use render::{
     detail_view_target, mouse_target, render, DetailView, DraftComment, FocusPane, MouseTarget,
-    TuiState,
+    PrListFilter, TuiState,
 };
 use terminal::TerminalGuard;
 
@@ -68,6 +68,7 @@ struct TuiApp {
     selected_repo: usize,
     focus: FocusPane,
     pull_requests: Vec<PullRequestSummary>,
+    pr_filter: PrListFilter,
     selected_pr: usize,
     detail: Option<PullRequestDetail>,
     comments: Vec<PrComment>,
@@ -112,6 +113,7 @@ impl TuiApp {
             selected_repo: 0,
             focus: FocusPane::Repositories,
             pull_requests: Vec::new(),
+            pr_filter: PrListFilter::Open,
             selected_pr: 0,
             detail: None,
             comments: Vec::new(),
@@ -152,6 +154,7 @@ impl TuiApp {
             KeyCode::Char('p') => self.publish_drafts(),
             KeyCode::Char('x') => self.discard_drafts(),
             KeyCode::Char('a') => self.start_ai_review(),
+            KeyCode::Char('f') => self.cycle_pr_filter(),
             KeyCode::Char('v') => self.toggle_detail_view(),
             KeyCode::Char('y') => self.copy_ai_review_output(),
             KeyCode::Char('r') => self.load_selected_repo(),
@@ -286,6 +289,12 @@ impl TuiApp {
         }
     }
 
+    fn cycle_pr_filter(&mut self) {
+        self.pr_filter = self.pr_filter.next();
+        self.selected_pr = 0;
+        self.load_selected_repo();
+    }
+
     fn load_selected_repo(&mut self) {
         let Some(repo) = self.repos.get(self.selected_repo) else {
             self.pull_requests.clear();
@@ -302,10 +311,13 @@ impl TuiApp {
         let provider = repo.provider;
         let workspace = repo.workspace.clone();
         let repo_name = repo.repo.clone();
-        self.status = format!("Loading open PRs for {workspace}/{repo_name}...");
+        self.status = format!(
+            "Loading {} PRs for {workspace}/{repo_name}...",
+            self.pr_filter.label()
+        );
         self.error = None;
         let opts = ListPrOptions {
-            state: Some("OPEN".to_string()),
+            state: Some(self.pr_filter.provider_state().to_string()),
             page: Some(1),
             pagelen: Some(50),
             query: None,
@@ -318,7 +330,11 @@ impl TuiApp {
             &opts,
         ) {
             Ok(page) => {
-                self.pull_requests = page.values;
+                self.pull_requests = page
+                    .values
+                    .into_iter()
+                    .filter(|pr| self.pr_filter.includes(pr))
+                    .collect();
                 self.selected_pr = 0;
                 self.detail = None;
                 self.comments.clear();
@@ -332,7 +348,11 @@ impl TuiApp {
                 self.reset_detail_scrolls();
                 self.ai_review_running_pr_ids.clear();
                 self.refresh_ai_review_markers(workspace.as_str(), repo_name.as_str());
-                self.status = format!("Loaded {} open PRs", self.pull_requests.len());
+                self.status = format!(
+                    "Loaded {} {} PRs",
+                    self.pull_requests.len(),
+                    self.pr_filter.label()
+                );
                 if !self.pull_requests.is_empty() {
                     self.load_selected_pr();
                 }
@@ -902,6 +922,7 @@ impl TuiApp {
             selected_repo: self.selected_repo,
             focus: self.focus,
             pull_requests: &self.pull_requests,
+            pr_filter: self.pr_filter,
             selected_pr: self.selected_pr,
             detail: self.detail.as_ref(),
             comments: &self.comments,
@@ -922,11 +943,14 @@ impl TuiApp {
 }
 
 fn build_review_payload(prompt: &str, detail: &PullRequestDetail, diff: &str) -> String {
+    let author = detail.author_display_name.trim();
+    let author = if author.is_empty() { "unknown" } else { author };
     let mut lines = vec![
         prompt.trim().to_string(),
         String::new(),
         "## Pull request".to_string(),
         format!("{} (#{})", detail.title, detail.id),
+        format!("Author: {author}"),
         format!(
             "Branch: {} -> {}",
             detail.source_branch, detail.destination_branch
@@ -1249,8 +1273,41 @@ mod tests {
 
         assert!(payload.contains("Review carefully."));
         assert!(payload.contains("Add GitHub TUI support (#7)"));
+        assert!(payload.contains("Author: unknown"));
         assert!(payload.contains("Branch: feature/7 -> main"));
         assert!(payload.contains("```diff\ndiff --git a/a b/a\n+new\n```"));
+    }
+
+    #[test]
+    fn draft_filter_uses_open_provider_state() {
+        assert_eq!(PrListFilter::Open.provider_state(), "OPEN");
+        assert_eq!(PrListFilter::Draft.provider_state(), "OPEN");
+        assert_eq!(PrListFilter::Merged.provider_state(), "MERGED");
+    }
+
+    #[test]
+    fn draft_filter_only_includes_draft_pull_requests() {
+        let mut draft = pr(1, "Draft");
+        draft.draft = true;
+        let ready = pr(2, "Ready");
+
+        assert!(PrListFilter::Draft.includes(&draft));
+        assert!(!PrListFilter::Draft.includes(&ready));
+        assert!(PrListFilter::Open.includes(&ready));
+    }
+
+    #[test]
+    fn filter_key_cycles_pull_request_modes() {
+        let mut app = TuiApp::from_repos(Vec::new());
+
+        app.handle_key(KeyCode::Char('f'));
+        assert_eq!(app.pr_filter, PrListFilter::Draft);
+
+        app.handle_key(KeyCode::Char('f'));
+        assert_eq!(app.pr_filter, PrListFilter::Merged);
+
+        app.handle_key(KeyCode::Char('f'));
+        assert_eq!(app.pr_filter, PrListFilter::Open);
     }
 
     #[test]
