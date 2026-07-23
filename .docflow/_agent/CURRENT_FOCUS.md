@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`1de1eba` - parallel terminal AI reviews across different pull requests.
+`cbd4719` - suppress optional skill/tool noise in AI review output.
 
 ## Next item
 
