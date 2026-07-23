@@ -909,7 +909,11 @@ impl TuiApp {
         let Some(repo) = self.repos.get(self.selected_repo) else {
             return Err("No repository selected.".to_string());
         };
-        lazygit::run_for_repo(repo)
+        let branch = self
+            .pull_requests
+            .get(self.selected_pr)
+            .map(|pr| pr.source_branch.as_str());
+        lazygit::run_for_repo(repo, branch)
     }
 
     fn finish_external_action(&mut self, result: Result<(), String>) {
