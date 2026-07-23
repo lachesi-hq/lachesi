@@ -8,14 +8,14 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** main
-- **Active item:** `.docflow/plan/todo/0001-agentic-code-policy-pack.md` for GitHub issue #43.
+- **Branch:** `codex/tui-roadmap`
+- **Active item:** `.docflow/plan/todo/0002-terminal-ui-foundation.md` for terminal UI issues #80-#84.
 - **Blockers:** none.
-- **Uncommitted work:** docflow bootstrap plus agentic-code policy pack prototype in progress; terminal UI ADR 0006 and plan item 0002 queued for issues #80-#82.
+- **Uncommitted work:** none.
 
 ## Last shipped
 
-`c9daa5a` - repository state before docflow bootstrap.
+`6a07e25` - terminal UI foundation branch validation fix.
 
 ## Next item
 
