@@ -1,4 +1,3 @@
-mod lazygit;
 mod render;
 mod terminal;
 
@@ -6,6 +5,11 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
+use crate::commands::repositories::{
+    checkout_repository_branch, fetch_repository, get_repository_file_diff, list_repository_files,
+    list_repository_worktrees, pull_repository, stash_repository, RepositoryFileEntry,
+    RepositoryFileStatus, RepositoryWorktreeState,
+};
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::services::bitbucket::{
     create_general_comment_native, get_pr_diff_native, get_pull_request_native,
@@ -43,12 +47,6 @@ pub fn run_from_env() -> Result<(), String> {
 
         if event::poll(TICK_RATE).map_err(|error| error.to_string())? {
             match event::read().map_err(|error| error.to_string())? {
-                Event::Key(key) if key.code == KeyCode::Char('g') => {
-                    let result = terminal
-                        .suspend(|| app.run_lazygit())
-                        .map_err(|error| error.to_string())?;
-                    app.finish_external_action(result);
-                }
                 Event::Key(key) => app.handle_key(key.code),
                 Event::Mouse(mouse) => {
                     let area = terminal.area().map_err(|error| error.to_string())?;
@@ -90,6 +88,11 @@ struct TuiApp {
     detail_view: DetailView,
     detail_scroll: usize,
     ai_review_scroll: usize,
+    git_worktree: Option<RepositoryWorktreeState>,
+    git_files: Vec<RepositoryFileEntry>,
+    git_selected_file: usize,
+    git_diff: Option<String>,
+    git_scroll: usize,
     error: Option<String>,
     status: String,
     should_quit: bool,
@@ -135,6 +138,11 @@ impl TuiApp {
             detail_view: DetailView::PullRequest,
             detail_scroll: 0,
             ai_review_scroll: 0,
+            git_worktree: None,
+            git_files: Vec::new(),
+            git_selected_file: 0,
+            git_diff: None,
+            git_scroll: 0,
             error: None,
             status: "Ready".to_string(),
             should_quit: false,
@@ -155,9 +163,14 @@ impl TuiApp {
             KeyCode::Char('x') => self.discard_drafts(),
             KeyCode::Char('a') => self.start_ai_review(),
             KeyCode::Char('f') => self.cycle_pr_filter(),
+            KeyCode::Char('g') => self.open_git_view(),
+            KeyCode::Char('b') => self.checkout_pr_branch(),
+            KeyCode::Char('s') => self.stash_git_repo(),
+            KeyCode::Char('u') => self.pull_git_repo(),
+            KeyCode::Char('F') => self.fetch_git_repo(),
             KeyCode::Char('v') => self.toggle_detail_view(),
             KeyCode::Char('y') => self.copy_ai_review_output(),
-            KeyCode::Char('r') => self.load_selected_repo(),
+            KeyCode::Char('r') => self.refresh_active_view(),
             KeyCode::PageUp => self.scroll_active_detail(-10),
             KeyCode::PageDown => self.scroll_active_detail(10),
             KeyCode::Home => self.reset_active_detail_scroll(),
@@ -184,7 +197,9 @@ impl TuiApp {
                     Some(MouseTarget::PullRequest(index)) => self.select_pr(index),
                     Some(MouseTarget::PrFilter(filter)) => self.set_pr_filter(filter),
                     None => {
-                        if let Some(view) = detail_view_target(area, mouse.column, mouse.row) {
+                        if let Some(view) =
+                            detail_view_target(area, mouse.column, mouse.row, self.detail_view)
+                        {
                             self.detail_view = view;
                         }
                     }
@@ -218,7 +233,9 @@ impl TuiApp {
     fn toggle_focus(&mut self) {
         self.focus = match self.focus {
             FocusPane::Repositories => FocusPane::PullRequests,
+            FocusPane::PullRequests if self.detail_view == DetailView::Git => FocusPane::Git,
             FocusPane::PullRequests => FocusPane::Repositories,
+            FocusPane::Git => FocusPane::Repositories,
         };
     }
 
@@ -226,6 +243,7 @@ impl TuiApp {
         match self.focus {
             FocusPane::Repositories => self.select_next_repo(),
             FocusPane::PullRequests => self.select_next_pr(),
+            FocusPane::Git => self.select_next_git_file(),
         }
     }
 
@@ -233,6 +251,7 @@ impl TuiApp {
         match self.focus {
             FocusPane::Repositories => self.select_previous_repo(),
             FocusPane::PullRequests => self.select_previous_pr(),
+            FocusPane::Git => self.select_previous_git_file(),
         }
     }
 
@@ -290,6 +309,26 @@ impl TuiApp {
         }
     }
 
+    fn select_next_git_file(&mut self) {
+        if self.git_files.is_empty() {
+            self.git_selected_file = 0;
+            return;
+        }
+        let previous = self.git_selected_file;
+        self.git_selected_file = (self.git_selected_file + 1).min(self.git_files.len() - 1);
+        if self.git_selected_file != previous {
+            self.load_selected_git_diff();
+        }
+    }
+
+    fn select_previous_git_file(&mut self) {
+        let previous = self.git_selected_file;
+        self.git_selected_file = self.git_selected_file.saturating_sub(1);
+        if self.git_selected_file != previous {
+            self.load_selected_git_diff();
+        }
+    }
+
     fn cycle_pr_filter(&mut self) {
         self.set_pr_filter(self.pr_filter.next());
     }
@@ -314,6 +353,7 @@ impl TuiApp {
             self.diff = None;
             self.drafts.clear();
             self.composer = None;
+            self.clear_git_state();
             self.status = "No repositories configured".to_string();
             return;
         };
@@ -355,6 +395,7 @@ impl TuiApp {
                 self.ai_review_output = None;
                 self.detail_view = DetailView::PullRequest;
                 self.reset_detail_scrolls();
+                self.clear_git_state();
                 self.ai_review_running_pr_ids.clear();
                 self.refresh_ai_review_markers(workspace.as_str(), repo_name.as_str());
                 self.status = format!(
@@ -380,6 +421,7 @@ impl TuiApp {
                 self.ai_review_output = None;
                 self.detail_view = DetailView::PullRequest;
                 self.reset_detail_scrolls();
+                self.clear_git_state();
                 self.error = Some(error);
                 self.status = "Failed to load PRs".to_string();
             }
@@ -594,11 +636,14 @@ impl TuiApp {
     fn toggle_detail_view(&mut self) {
         self.detail_view = match self.detail_view {
             DetailView::PullRequest => DetailView::AiReview,
-            DetailView::AiReview => DetailView::PullRequest,
+            DetailView::AiReview => DetailView::Git,
+            DetailView::Git => DetailView::PullRequest,
         };
         if self.detail_view == DetailView::AiReview {
             self.refresh_ai_review_output();
             self.status = "Showing AI review output".to_string();
+        } else if self.detail_view == DetailView::Git {
+            self.load_git_view();
         } else {
             self.status = "Showing pull request detail".to_string();
         }
@@ -614,11 +659,15 @@ impl TuiApp {
                 self.ai_review_scroll = self.ai_review_scroll.saturating_add_signed(delta);
                 self.status = "Scrolled AI review output".to_string();
             }
+            DetailView::Git => {
+                self.git_scroll = self.git_scroll.saturating_add_signed(delta);
+                self.status = "Scrolled Git diff".to_string();
+            }
         }
     }
 
     fn scroll_detail_at(&mut self, area: ratatui::layout::Rect, x: u16, y: u16, delta: isize) {
-        let Some(view) = detail_view_target(area, x, y) else {
+        let Some(view) = detail_view_target(area, x, y, self.detail_view) else {
             return;
         };
         self.detail_view = view;
@@ -635,12 +684,220 @@ impl TuiApp {
                 self.ai_review_scroll = 0;
                 self.status = "Reset AI review scroll".to_string();
             }
+            DetailView::Git => {
+                self.git_scroll = 0;
+                self.status = "Reset Git diff scroll".to_string();
+            }
         }
     }
 
     fn reset_detail_scrolls(&mut self) {
         self.detail_scroll = 0;
         self.ai_review_scroll = 0;
+        self.git_scroll = 0;
+    }
+
+    fn refresh_active_view(&mut self) {
+        if self.detail_view == DetailView::Git {
+            self.load_git_view();
+        } else {
+            self.load_selected_repo();
+        }
+    }
+
+    fn clear_git_state(&mut self) {
+        self.git_worktree = None;
+        self.git_files.clear();
+        self.git_selected_file = 0;
+        self.git_diff = None;
+        self.git_scroll = 0;
+    }
+
+    fn selected_repo_ref(&self) -> Option<&RepoRef> {
+        self.repos.get(self.selected_repo)
+    }
+
+    fn selected_pr_branch(&self) -> Option<String> {
+        self.selected_pr_branch_ref().map(ToString::to_string)
+    }
+
+    fn selected_pr_branch_ref(&self) -> Option<&str> {
+        self.pull_requests
+            .get(self.selected_pr)
+            .map(|pr| pr.source_branch.trim())
+            .filter(|branch| !branch.is_empty())
+    }
+
+    fn selected_repo_input(&self) -> Option<(String, String)> {
+        let repo = self.selected_repo_ref()?;
+        Some((repo.workspace.clone(), repo.repo.clone()))
+    }
+
+    fn open_git_view(&mut self) {
+        self.detail_view = DetailView::Git;
+        self.focus = FocusPane::Git;
+        self.load_git_view();
+    }
+
+    fn load_git_view(&mut self) {
+        let Some((workspace, repo)) = self.selected_repo_input() else {
+            self.clear_git_state();
+            self.status = "No repository selected".to_string();
+            return;
+        };
+        self.error = None;
+        self.status = format!("Loading Git state for {workspace}/{repo}...");
+        match self.load_git_worktree(&workspace, &repo) {
+            Ok(()) => {
+                self.load_git_files(&workspace, &repo);
+            }
+            Err(error) => {
+                self.clear_git_state();
+                self.error = Some(error);
+                self.status = "Failed to load Git state".to_string();
+            }
+        }
+    }
+
+    fn load_git_worktree(&mut self, workspace: &str, repo: &str) -> Result<(), String> {
+        let worktrees = list_repository_worktrees()?;
+        self.git_worktree = worktrees
+            .into_iter()
+            .find(|worktree| worktree.workspace == workspace && worktree.repo == repo);
+        if self.git_worktree.is_none() {
+            return Err(format!("Repository {workspace}/{repo} is not configured."));
+        }
+        Ok(())
+    }
+
+    fn load_git_files(&mut self, workspace: &str, repo: &str) {
+        match list_repository_files(workspace.to_string(), repo.to_string()) {
+            Ok(files) => {
+                self.git_files = files
+                    .into_iter()
+                    .filter(|file| git_file_has_changes(&file.status))
+                    .collect();
+                self.git_selected_file = self
+                    .git_selected_file
+                    .min(self.git_files.len().saturating_sub(1));
+                self.git_scroll = 0;
+                self.load_selected_git_diff();
+                self.status = format!("Loaded {} changed Git file(s)", self.git_files.len());
+            }
+            Err(error) => {
+                self.git_files.clear();
+                self.git_selected_file = 0;
+                self.git_diff = None;
+                self.error = Some(error);
+                self.status = "Failed to load Git files".to_string();
+            }
+        }
+    }
+
+    fn load_selected_git_diff(&mut self) {
+        let Some((workspace, repo)) = self.selected_repo_input() else {
+            self.git_diff = None;
+            return;
+        };
+        let Some(file) = self.git_files.get(self.git_selected_file) else {
+            self.git_diff = None;
+            return;
+        };
+        match get_repository_file_diff(workspace, repo, file.path.clone()) {
+            Ok(diff) => {
+                self.git_diff = Some(diff.raw_diff);
+                self.git_scroll = 0;
+                self.error = None;
+            }
+            Err(error) => {
+                self.git_diff = None;
+                self.error = Some(error);
+            }
+        }
+    }
+
+    fn checkout_pr_branch(&mut self) {
+        let Some((workspace, repo)) = self.selected_repo_input() else {
+            self.status = "No repository selected".to_string();
+            return;
+        };
+        let Some(branch) = self.selected_pr_branch() else {
+            self.status = "Select a pull request before checkout".to_string();
+            return;
+        };
+        self.detail_view = DetailView::Git;
+        match checkout_repository_branch(workspace.clone(), repo.clone(), branch.clone()) {
+            Ok(worktree) => {
+                self.git_worktree = Some(worktree);
+                self.load_git_files(&workspace, &repo);
+                self.error = None;
+                self.status = format!("Checked out {branch}");
+            }
+            Err(error) => {
+                self.error = Some(error);
+                self.status = format!("Checkout {branch} failed");
+            }
+        }
+    }
+
+    fn fetch_git_repo(&mut self) {
+        let Some((workspace, repo)) = self.selected_repo_input() else {
+            self.status = "No repository selected".to_string();
+            return;
+        };
+        self.detail_view = DetailView::Git;
+        match fetch_repository(workspace.clone(), repo.clone()) {
+            Ok(worktree) => {
+                self.git_worktree = Some(worktree);
+                self.load_git_files(&workspace, &repo);
+                self.error = None;
+                self.status = "Fetch completed".to_string();
+            }
+            Err(error) => {
+                self.error = Some(error);
+                self.status = "Fetch failed".to_string();
+            }
+        }
+    }
+
+    fn pull_git_repo(&mut self) {
+        let Some((workspace, repo)) = self.selected_repo_input() else {
+            self.status = "No repository selected".to_string();
+            return;
+        };
+        self.detail_view = DetailView::Git;
+        match pull_repository(workspace.clone(), repo.clone()) {
+            Ok(worktree) => {
+                self.git_worktree = Some(worktree);
+                self.load_git_files(&workspace, &repo);
+                self.error = None;
+                self.status = "Pull completed".to_string();
+            }
+            Err(error) => {
+                self.error = Some(error);
+                self.status = "Pull failed".to_string();
+            }
+        }
+    }
+
+    fn stash_git_repo(&mut self) {
+        let Some((workspace, repo)) = self.selected_repo_input() else {
+            self.status = "No repository selected".to_string();
+            return;
+        };
+        self.detail_view = DetailView::Git;
+        match stash_repository(workspace.clone(), repo.clone()) {
+            Ok(worktree) => {
+                self.git_worktree = Some(worktree);
+                self.load_git_files(&workspace, &repo);
+                self.error = None;
+                self.status = "Local changes stashed".to_string();
+            }
+            Err(error) => {
+                self.error = Some(error);
+                self.status = "Stash failed".to_string();
+            }
+        }
     }
 
     fn copy_ai_review_output(&mut self) {
@@ -905,30 +1162,6 @@ impl TuiApp {
         ))
     }
 
-    fn run_lazygit(&self) -> Result<(), String> {
-        let Some(repo) = self.repos.get(self.selected_repo) else {
-            return Err("No repository selected.".to_string());
-        };
-        let branch = self
-            .pull_requests
-            .get(self.selected_pr)
-            .map(|pr| pr.source_branch.as_str());
-        lazygit::run_for_repo(repo, branch)
-    }
-
-    fn finish_external_action(&mut self, result: Result<(), String>) {
-        match result {
-            Ok(()) => {
-                self.status = "Returned from lazygit".to_string();
-                self.error = None;
-            }
-            Err(error) => {
-                self.status = "Failed to launch lazygit".to_string();
-                self.error = Some(error);
-            }
-        }
-    }
-
     fn view_state(&self) -> TuiState<'_> {
         TuiState {
             repos: &self.repos,
@@ -949,6 +1182,12 @@ impl TuiApp {
             detail_view: self.detail_view,
             detail_scroll: self.detail_scroll,
             ai_review_scroll: self.ai_review_scroll,
+            git_worktree: self.git_worktree.as_ref(),
+            git_files: &self.git_files,
+            git_selected_file: self.git_selected_file,
+            git_diff: self.git_diff.as_deref(),
+            git_scroll: self.git_scroll,
+            git_pr_branch: self.selected_pr_branch_ref(),
             error: self.error.as_deref(),
             status: self.status.as_str(),
         }
@@ -995,6 +1234,10 @@ fn ai_provider_label(provider: AiProvider) -> &'static str {
 
 fn default_review_prompt() -> String {
     DEFAULT_REVIEW_PROMPT.trim().to_string()
+}
+
+fn git_file_has_changes(status: &RepositoryFileStatus) -> bool {
+    !matches!(status, RepositoryFileStatus::Unchanged)
 }
 
 #[cfg(test)]
@@ -1166,22 +1409,39 @@ mod tests {
     }
 
     #[test]
-    fn lazygit_without_selected_repo_is_reported() {
-        let app = TuiApp::from_repos(Vec::new());
+    fn selected_pull_request_branch_uses_loaded_list() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.pull_requests = vec![pr(1, "One"), pr(2, "Two")];
+        app.selected_pr = 1;
 
-        let error = app.run_lazygit().expect_err("missing repo should fail");
-
-        assert_eq!(error, "No repository selected.");
+        assert_eq!(app.selected_pr_branch_ref(), Some("feature/2"));
     }
 
     #[test]
-    fn external_action_error_updates_status() {
-        let mut app = TuiApp::from_repos(Vec::new());
+    fn git_file_change_filter_excludes_unchanged_files() {
+        assert!(!git_file_has_changes(&RepositoryFileStatus::Unchanged));
+        assert!(git_file_has_changes(&RepositoryFileStatus::Modified));
+        assert!(git_file_has_changes(&RepositoryFileStatus::Untracked));
+    }
 
-        app.finish_external_action(Err("missing lazygit".to_string()));
+    #[test]
+    fn mouse_wheel_scrolls_git_view_without_switching_to_ai_review() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.detail_view = DetailView::Git;
 
-        assert_eq!(app.status, "Failed to launch lazygit");
-        assert_eq!(app.error.as_deref(), Some("missing lazygit"));
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 70,
+                row: 15,
+                modifiers: event::KeyModifiers::empty(),
+            },
+            ratatui::layout::Rect::new(0, 0, 100, 24),
+        );
+
+        assert_eq!(app.detail_view, DetailView::Git);
+        assert_eq!(app.git_scroll, 3);
+        assert_eq!(app.ai_review_scroll, 0);
     }
 
     #[test]

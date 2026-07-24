@@ -55,15 +55,6 @@ impl TerminalGuard {
             .size()
             .map(|size| Rect::new(0, 0, size.width, size.height))
     }
-
-    pub fn suspend<T>(&mut self, action: impl FnOnce() -> T) -> io::Result<T> {
-        restore_terminal()?;
-        let output = action();
-        enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture, Hide)?;
-        self.terminal.clear()?;
-        Ok(output)
-    }
 }
 
 impl Drop for TerminalGuard {
