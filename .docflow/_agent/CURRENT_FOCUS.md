@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`3a53457` - add split TUI diff mode.
+`5e0993f` - render TUI diffs with delta pager.
 
 ## Next item
 
