@@ -8,8 +8,8 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-86-current-repo-lac`
-- **Active item:** GitHub issue #86, current-repository startup for `lac`.
+- **Branch:** `issue-87-tui-config-credentials`
+- **Active item:** GitHub issue #87, TOML environment references for TUI provider credentials.
 - **Blockers:** none.
 - **Uncommitted work:** none.
 
