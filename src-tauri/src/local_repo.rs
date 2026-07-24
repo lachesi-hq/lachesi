@@ -131,6 +131,7 @@ pub fn parse_git_remote(remote: &str) -> Result<(ReviewProvider, String, String)
     if trimmed.is_empty() {
         return Err("Git remote URL is empty.".to_string());
     }
+    let display_remote = redact_git_remote(trimmed);
 
     let without_suffix = trimmed
         .split(['?', '#'])
@@ -142,27 +143,29 @@ pub fn parse_git_remote(remote: &str) -> Result<(ReviewProvider, String, String)
     let (host, path) = if let Some(rest) = without_suffix.strip_prefix("git@") {
         let (host, path) = rest
             .split_once(':')
-            .ok_or_else(|| format!("Cannot parse git remote URL: {trimmed}."))?;
+            .ok_or_else(|| format!("Cannot parse git remote URL: {display_remote}."))?;
         (host, path)
     } else if let Some(rest) = without_suffix.strip_prefix("ssh://git@") {
         let (host, path) = rest
             .split_once('/')
-            .ok_or_else(|| format!("Cannot parse git remote URL: {trimmed}."))?;
+            .ok_or_else(|| format!("Cannot parse git remote URL: {display_remote}."))?;
         (host, path)
     } else if let Some(rest) = without_suffix.strip_prefix("https://") {
         let rest = rest.split_once('@').map(|(_, after)| after).unwrap_or(rest);
         let (host, path) = rest
             .split_once('/')
-            .ok_or_else(|| format!("Cannot parse git remote URL: {trimmed}."))?;
+            .ok_or_else(|| format!("Cannot parse git remote URL: {display_remote}."))?;
         (host, path)
     } else if let Some(rest) = without_suffix.strip_prefix("http://") {
         let rest = rest.split_once('@').map(|(_, after)| after).unwrap_or(rest);
         let (host, path) = rest
             .split_once('/')
-            .ok_or_else(|| format!("Cannot parse git remote URL: {trimmed}."))?;
+            .ok_or_else(|| format!("Cannot parse git remote URL: {display_remote}."))?;
         (host, path)
     } else {
-        return Err(format!("Unsupported git remote URL: {trimmed}."));
+        return Err(format!(
+            "Unsupported git remote URL: {display_remote}. Run `lac` from a clone whose remote is on github.com or bitbucket.org, or use `lac --workspace` to open configured repositories."
+        ));
     };
 
     let provider = match host.to_lowercase().as_str() {
@@ -170,23 +173,34 @@ pub fn parse_git_remote(remote: &str) -> Result<(ReviewProvider, String, String)
         "github.com" => ReviewProvider::Github,
         _ => {
             return Err(format!(
-                "Unsupported git remote host `{host}`. Lachesi supports github.com and bitbucket.org."
+                "Unsupported git remote host `{host}`. Run `lac` from a clone whose remote is on github.com or bitbucket.org, or use `lac --workspace` to open configured repositories."
             ));
         }
     };
 
     let mut parts = path.split('/').filter(|part| !part.is_empty());
-    let workspace = parts
-        .next()
-        .ok_or_else(|| format!("Cannot find repository owner in git remote URL: {trimmed}."))?;
-    let repo = parts
-        .next()
-        .ok_or_else(|| format!("Cannot find repository name in git remote URL: {trimmed}."))?;
+    let workspace = parts.next().ok_or_else(|| {
+        format!("Cannot find repository owner in git remote URL: {display_remote}.")
+    })?;
+    let repo = parts.next().ok_or_else(|| {
+        format!("Cannot find repository name in git remote URL: {display_remote}.")
+    })?;
     if parts.next().is_some() {
-        return Err(format!("Cannot parse git remote URL: {trimmed}."));
+        return Err(format!("Cannot parse git remote URL: {display_remote}."));
     }
 
     Ok((provider, workspace.to_string(), repo.to_string()))
+}
+
+fn redact_git_remote(remote: &str) -> String {
+    for scheme in ["https://", "http://", "ssh://"] {
+        if let Some(rest) = remote.strip_prefix(scheme) {
+            if let Some((_userinfo, after)) = rest.split_once('@') {
+                return format!("{scheme}<redacted>@{after}");
+            }
+        }
+    }
+    remote.to_string()
 }
 
 fn git_output(args: &[&str], working_dir: &Path) -> Result<String, String> {
@@ -214,18 +228,21 @@ fn current_repo_remote(root: &Path) -> Result<(String, String), String> {
         }
     }
 
-    let remotes = git_output(&["remote"], root)
-        .map_err(|_| "This git repository has no remotes configured.".to_string())?;
+    let remotes = git_output(&["remote"], root).map_err(|_| missing_remote_message())?;
     let Some(remote_name) = remotes.lines().find(|line| !line.trim().is_empty()) else {
-        return Err("This git repository has no remotes configured.".to_string());
+        return Err(missing_remote_message());
     };
     let remote_url = git_output(&["remote", "get-url", remote_name.trim()], root)?;
     Ok((remote_name.trim().to_string(), remote_url))
 }
 
 pub fn resolve_current_repo_from_dir(dir: &Path) -> Result<RepoRef, String> {
-    let root = git_output(&["rev-parse", "--show-toplevel"], dir)
-        .map_err(|_| format!("{} is not inside a git repository.", dir.display()))?;
+    let root = git_output(&["rev-parse", "--show-toplevel"], dir).map_err(|_| {
+        format!(
+            "{} is not inside a git repository. Run `lac` from a local clone with a GitHub or Bitbucket remote, or use `lac --workspace` to open configured repositories.",
+            dir.display()
+        )
+    })?;
     let root = PathBuf::from(root);
     let (_remote_name, remote_url) = current_repo_remote(&root)?;
     let (provider, workspace, repo) = parse_git_remote(&remote_url)?;
@@ -241,6 +258,11 @@ pub fn resolve_current_repo_from_dir(dir: &Path) -> Result<RepoRef, String> {
 pub fn resolve_current_repo() -> Result<RepoRef, String> {
     let cwd = env::current_dir().map_err(|e| format!("Cannot read current directory: {e}"))?;
     resolve_current_repo_from_dir(&cwd)
+}
+
+fn missing_remote_message() -> String {
+    "This git repository has no remotes configured. Add an origin remote for GitHub or Bitbucket, or use `lac --workspace` to open configured repositories."
+        .to_string()
 }
 
 pub fn configured_repo_path(repo_ref: &RepoRef) -> Option<PathBuf> {
@@ -409,5 +431,48 @@ mod tests {
         );
 
         fs::remove_dir_all(path).expect("cleanup temp repo");
+    }
+
+    #[test]
+    fn resolving_current_repo_reports_non_git_directory() {
+        let path = temp_path("not-git");
+        fs::create_dir_all(&path).expect("temp dir");
+
+        let error = match resolve_current_repo_from_dir(&path) {
+            Ok(_) => panic!("expected non-git error"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("not inside a git repository"));
+        assert!(error.contains("lac --workspace"));
+        fs::remove_dir_all(path).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn resolving_current_repo_reports_missing_remote() {
+        let path = temp_path("no-remote");
+        fs::create_dir_all(&path).expect("temp repo dir");
+        Command::new("/usr/bin/git")
+            .arg("init")
+            .arg(&path)
+            .output()
+            .expect("git init");
+
+        let error = match resolve_current_repo_from_dir(&path) {
+            Ok(_) => panic!("expected missing remote error"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("no remotes configured"));
+        assert!(error.contains("lac --workspace"));
+        fs::remove_dir_all(path).expect("cleanup temp repo");
+    }
+
+    #[test]
+    fn remote_parse_errors_redact_userinfo() {
+        let error = parse_git_remote("https://user:secret@github.com/owner").unwrap_err();
+
+        assert!(error.contains("<redacted>@github.com"));
+        assert!(!error.contains("secret"));
     }
 }

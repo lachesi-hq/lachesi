@@ -214,6 +214,41 @@ pnpm tauri dev
 
 Runs the desktop app against the Tauri backend.
 
+### Terminal UI
+
+Build and install the terminal UI as `lac`:
+
+```sh
+make tui-build
+make tui-install
+```
+
+Run `lac` from inside a local Git clone. It reads the repository remote, detects GitHub or
+Bitbucket, and opens pull requests for that repository:
+
+```sh
+cd ~/dev/current/lachesi
+lac
+```
+
+Use `lac --workspace` to open the configured repository picker instead. If the current directory is
+not inside a Git repository, has no remote, or uses an unsupported remote host, `lac` exits with a
+message explaining the problem and the `--workspace` fallback.
+
+For terminal-only usage, provider credentials can come from the OS keychain, ordinary environment
+variables, or environment-variable references in `~/.config/lachesi/config.toml`:
+
+```toml
+[credentials.github]
+token_env = "GITHUB_TOKEN"
+
+[credentials.bitbucket]
+username_env = "BITBUCKET_USERNAME"
+token_env = "BITBUCKET_TOKEN"
+```
+
+Keep actual tokens in the environment or OS credentials store, not in the TOML file.
+
 ### Test And Build
 
 ```sh

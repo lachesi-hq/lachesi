@@ -50,7 +50,8 @@ impl BitbucketClient {
 
     fn from_stored() -> Result<Self, String> {
         let creds = credentials::load().ok_or_else(|| {
-            "No Bitbucket credentials configured. Open Settings to add them.".to_string()
+            "No Bitbucket credentials configured. Open Settings to add them, set BITBUCKET_USERNAME and BITBUCKET_TOKEN, or configure env refs in ~/.config/lachesi/config.toml."
+                .to_string()
         })?;
         Self::new(creds)
     }
@@ -84,8 +85,10 @@ impl GithubClient {
     }
 
     fn from_stored() -> Result<Self, String> {
-        let token = credentials::load_github_token()
-            .ok_or_else(|| "No GitHub token configured. Open Settings to add it.".to_string())?;
+        let token = credentials::load_github_token().ok_or_else(|| {
+            "No GitHub token configured. Open Settings to add it, set GITHUB_TOKEN, or configure an env ref in ~/.config/lachesi/config.toml."
+                .to_string()
+        })?;
         Self::new(token)
     }
 
