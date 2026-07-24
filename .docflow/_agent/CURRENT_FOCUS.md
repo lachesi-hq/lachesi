@@ -8,8 +8,8 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `main`
-- **Active item:** `.docflow/plan/todo/0002-terminal-ui-foundation.md` for terminal UI issues #80-#84.
+- **Branch:** `issue-86-current-repo-lac`
+- **Active item:** GitHub issue #86, current-repository startup for `lac`.
 - **Blockers:** none.
 - **Uncommitted work:** none.
 

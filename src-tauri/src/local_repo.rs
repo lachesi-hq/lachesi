@@ -126,6 +126,123 @@ pub fn git_origin_matches(
     Ok(matches_remote(&remote, provider, workspace, repo))
 }
 
+pub fn parse_git_remote(remote: &str) -> Result<(ReviewProvider, String, String), String> {
+    let trimmed = remote.trim();
+    if trimmed.is_empty() {
+        return Err("Git remote URL is empty.".to_string());
+    }
+
+    let without_suffix = trimmed
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(trimmed)
+        .trim_end_matches('/')
+        .trim_end_matches(".git");
+
+    let (host, path) = if let Some(rest) = without_suffix.strip_prefix("git@") {
+        let (host, path) = rest
+            .split_once(':')
+            .ok_or_else(|| format!("Cannot parse git remote URL: {trimmed}."))?;
+        (host, path)
+    } else if let Some(rest) = without_suffix.strip_prefix("ssh://git@") {
+        let (host, path) = rest
+            .split_once('/')
+            .ok_or_else(|| format!("Cannot parse git remote URL: {trimmed}."))?;
+        (host, path)
+    } else if let Some(rest) = without_suffix.strip_prefix("https://") {
+        let rest = rest.split_once('@').map(|(_, after)| after).unwrap_or(rest);
+        let (host, path) = rest
+            .split_once('/')
+            .ok_or_else(|| format!("Cannot parse git remote URL: {trimmed}."))?;
+        (host, path)
+    } else if let Some(rest) = without_suffix.strip_prefix("http://") {
+        let rest = rest.split_once('@').map(|(_, after)| after).unwrap_or(rest);
+        let (host, path) = rest
+            .split_once('/')
+            .ok_or_else(|| format!("Cannot parse git remote URL: {trimmed}."))?;
+        (host, path)
+    } else {
+        return Err(format!("Unsupported git remote URL: {trimmed}."));
+    };
+
+    let provider = match host.to_lowercase().as_str() {
+        "bitbucket.org" => ReviewProvider::Bitbucket,
+        "github.com" => ReviewProvider::Github,
+        _ => {
+            return Err(format!(
+                "Unsupported git remote host `{host}`. Lachesi supports github.com and bitbucket.org."
+            ));
+        }
+    };
+
+    let mut parts = path.split('/').filter(|part| !part.is_empty());
+    let workspace = parts
+        .next()
+        .ok_or_else(|| format!("Cannot find repository owner in git remote URL: {trimmed}."))?;
+    let repo = parts
+        .next()
+        .ok_or_else(|| format!("Cannot find repository name in git remote URL: {trimmed}."))?;
+    if parts.next().is_some() {
+        return Err(format!("Cannot parse git remote URL: {trimmed}."));
+    }
+
+    Ok((provider, workspace.to_string(), repo.to_string()))
+}
+
+fn git_output(args: &[&str], working_dir: &Path) -> Result<String, String> {
+    let output = Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(working_dir)
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to run git in {}: {e}", working_dir.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "git command failed".to_string()
+        } else {
+            stderr
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn current_repo_remote(root: &Path) -> Result<(String, String), String> {
+    if let Ok(origin) = git_output(&["remote", "get-url", "origin"], root) {
+        if !origin.trim().is_empty() {
+            return Ok(("origin".to_string(), origin));
+        }
+    }
+
+    let remotes = git_output(&["remote"], root)
+        .map_err(|_| "This git repository has no remotes configured.".to_string())?;
+    let Some(remote_name) = remotes.lines().find(|line| !line.trim().is_empty()) else {
+        return Err("This git repository has no remotes configured.".to_string());
+    };
+    let remote_url = git_output(&["remote", "get-url", remote_name.trim()], root)?;
+    Ok((remote_name.trim().to_string(), remote_url))
+}
+
+pub fn resolve_current_repo_from_dir(dir: &Path) -> Result<RepoRef, String> {
+    let root = git_output(&["rev-parse", "--show-toplevel"], dir)
+        .map_err(|_| format!("{} is not inside a git repository.", dir.display()))?;
+    let root = PathBuf::from(root);
+    let (_remote_name, remote_url) = current_repo_remote(&root)?;
+    let (provider, workspace, repo) = parse_git_remote(&remote_url)?;
+
+    Ok(RepoRef {
+        provider,
+        workspace,
+        repo,
+        local_path: Some(root.display().to_string()),
+    })
+}
+
+pub fn resolve_current_repo() -> Result<RepoRef, String> {
+    let cwd = env::current_dir().map_err(|e| format!("Cannot read current directory: {e}"))?;
+    resolve_current_repo_from_dir(&cwd)
+}
+
 pub fn configured_repo_path(repo_ref: &RepoRef) -> Option<PathBuf> {
     repo_ref
         .local_path
@@ -210,4 +327,87 @@ pub fn find_in_path(bin: &str) -> Option<PathBuf> {
                 .map(|meta| meta.is_file())
                 .unwrap_or(false)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        env::temp_dir().join(format!(
+            "lachesi-local-repo-{name}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn parses_github_and_bitbucket_remote_urls() {
+        assert_eq!(
+            parse_git_remote("git@github.com:lachesi-hq/lachesi.git").unwrap(),
+            (
+                ReviewProvider::Github,
+                "lachesi-hq".to_string(),
+                "lachesi".to_string()
+            )
+        );
+        assert_eq!(
+            parse_git_remote("https://bitbucket.org/compri-vcs/procurement-frontend.git").unwrap(),
+            (
+                ReviewProvider::Bitbucket,
+                "compri-vcs".to_string(),
+                "procurement-frontend".to_string()
+            )
+        );
+        assert_eq!(
+            parse_git_remote("ssh://git@github.com/lachesi-hq/lachesi.git").unwrap(),
+            (
+                ReviewProvider::Github,
+                "lachesi-hq".to_string(),
+                "lachesi".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_remote_hosts() {
+        let error = parse_git_remote("git@example.com:owner/repo.git").unwrap_err();
+        assert!(error.contains("Unsupported git remote host"));
+    }
+
+    #[test]
+    fn resolves_current_repo_from_git_remote() {
+        let path = temp_path("current");
+        fs::create_dir_all(&path).expect("temp repo dir");
+        Command::new("/usr/bin/git")
+            .arg("init")
+            .arg(&path)
+            .output()
+            .expect("git init");
+        Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&path)
+            .arg("remote")
+            .arg("add")
+            .arg("origin")
+            .arg("git@github.com:lachesi-hq/lachesi.git")
+            .output()
+            .expect("git remote add");
+
+        let resolved = resolve_current_repo_from_dir(&path).expect("current repo");
+
+        assert_eq!(resolved.provider, ReviewProvider::Github);
+        assert_eq!(resolved.workspace, "lachesi-hq");
+        assert_eq!(resolved.repo, "lachesi");
+        assert_eq!(
+            fs::canonicalize(resolved.local_path.as_deref().unwrap()).expect("resolved path"),
+            fs::canonicalize(&path).expect("expected path")
+        );
+
+        fs::remove_dir_all(path).expect("cleanup temp repo");
+    }
 }

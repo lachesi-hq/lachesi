@@ -12,6 +12,7 @@ use std::{
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
+use crate::local_repo;
 use crate::services::bitbucket::{
     create_general_comment_native, get_pr_diff_native, get_pull_request_native,
     list_comments_native, list_pull_requests_native, validate_repo_review_config_native,
@@ -32,8 +33,23 @@ const TICK_RATE: Duration = Duration::from_millis(250);
 const DEFAULT_REVIEW_PROMPT: &str = include_str!("../../../src/lib/defaultReviewPrompt.md");
 
 pub fn run_from_env() -> Result<(), String> {
-    let config = config::load();
+    let launch_mode = launch_mode_from_args(std::env::args().skip(1))?;
+    let mut config = config::load();
+    let focus_prs = match launch_mode {
+        TuiLaunchMode::Help => {
+            println!("{}", tui_usage());
+            return Ok(());
+        }
+        TuiLaunchMode::CurrentRepo => {
+            config.repos = vec![local_repo::resolve_current_repo()?];
+            true
+        }
+        TuiLaunchMode::Workspace => false,
+    };
     let mut app = TuiApp::from_config(config);
+    if focus_prs {
+        app.focus = FocusPane::PullRequests;
+    }
     app.load_selected_repo();
     let mut terminal = TerminalGuard::enter().map_err(|error| error.to_string())?;
 
@@ -63,6 +79,38 @@ pub fn run_from_env() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TuiLaunchMode {
+    Help,
+    CurrentRepo,
+    Workspace,
+}
+
+fn tui_usage() -> &'static str {
+    "Usage: lac [--current-repo] [--workspace]\n\nBy default, lac opens pull requests for the git repository in the current directory."
+}
+
+fn launch_mode_from_args<I, S>(args: I) -> Result<TuiLaunchMode, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut mode = TuiLaunchMode::CurrentRepo;
+    for arg in args {
+        match arg.as_ref() {
+            "--workspace" | "--global" => mode = TuiLaunchMode::Workspace,
+            "--current-repo" => mode = TuiLaunchMode::CurrentRepo,
+            "-h" | "--help" => return Ok(TuiLaunchMode::Help),
+            unknown => {
+                return Err(format!(
+                    "Unknown option `{unknown}`. Use `lac --workspace` for the configured repository picker."
+                ));
+            }
+        }
+    }
+    Ok(mode)
 }
 
 struct TuiApp {
@@ -1246,6 +1294,24 @@ mod tests {
             .expect("system time")
             .as_nanos();
         std::env::temp_dir().join(format!("lachesi-tui-{name}-{}-{nonce}", std::process::id()))
+    }
+
+    #[test]
+    fn tui_launch_defaults_to_current_repository() {
+        assert_eq!(
+            launch_mode_from_args(Vec::<String>::new()).unwrap(),
+            TuiLaunchMode::CurrentRepo
+        );
+        assert_eq!(
+            launch_mode_from_args(["--workspace"]).unwrap(),
+            TuiLaunchMode::Workspace
+        );
+    }
+
+    #[test]
+    fn tui_launch_rejects_unknown_options() {
+        let error = launch_mode_from_args(["--repo"]).unwrap_err();
+        assert!(error.contains("Unknown option"));
     }
 
     #[test]
