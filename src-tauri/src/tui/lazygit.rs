@@ -46,11 +46,6 @@ fn checkout_pr_branch(repo_path: &Path, branch: &str) -> Result<(), String> {
     if current_branch(repo_path)? == branch {
         return Ok(());
     }
-    if dirty(repo_path)? {
-        return Err(format!(
-            "Cannot open lazygit on PR branch `{branch}` because the repository has uncommitted changes. Commit or stash them first."
-        ));
-    }
     if ref_exists(repo_path, &format!("refs/heads/{branch}"))? {
         return run_git_checked(repo_path, &["checkout", branch]).map(|_| ());
     }
@@ -81,10 +76,6 @@ fn current_branch(repo_path: &Path) -> Result<String, String> {
             .trim()
             .to_string(),
     )
-}
-
-fn dirty(repo_path: &Path) -> Result<bool, String> {
-    Ok(!run_git_checked(repo_path, &["status", "--porcelain"])?.is_empty())
 }
 
 fn ref_exists(repo_path: &Path, reference: &str) -> Result<bool, String> {
@@ -178,17 +169,38 @@ mod tests {
     }
 
     #[test]
-    fn dirty_worktree_blocks_pull_request_branch_checkout() {
+    fn non_conflicting_dirty_worktree_can_checkout_pull_request_branch() {
         let repo = init_repo();
+        fs::write(repo.join("local.txt"), "local\n").expect("write local file");
+
         run_git_checked(&repo, &["checkout", "-b", "feature/pr"]).expect("create branch");
         run_git_checked(&repo, &["checkout", "main"])
             .or_else(|_| run_git_checked(&repo, &["checkout", "master"]))
             .expect("checkout default branch");
-        fs::write(repo.join("README.md"), "dirty\n").expect("dirty readme");
 
-        let error = checkout_pr_branch(&repo, "feature/pr").expect_err("dirty should block");
+        checkout_pr_branch(&repo, "feature/pr").expect("checkout PR branch");
 
-        assert!(error.contains("uncommitted changes"));
+        assert_eq!(current_branch(&repo).expect("current branch"), "feature/pr");
+        assert!(repo.join("local.txt").exists());
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn conflicting_dirty_worktree_reports_git_checkout_error() {
+        let repo = init_repo();
+        run_git_checked(&repo, &["checkout", "-b", "feature/pr"]).expect("create branch");
+        fs::write(repo.join("README.md"), "branch\n").expect("write branch readme");
+        run_git_checked(&repo, &["add", "README.md"]).expect("git add branch readme");
+        run_git_checked(&repo, &["commit", "-m", "Branch change"]).expect("commit branch change");
+        run_git_checked(&repo, &["checkout", "main"])
+            .or_else(|_| run_git_checked(&repo, &["checkout", "master"]))
+            .expect("checkout default branch");
+        fs::write(repo.join("README.md"), "local dirty\n").expect("dirty readme");
+
+        let error =
+            checkout_pr_branch(&repo, "feature/pr").expect_err("dirty conflict should fail");
+
+        assert!(error.contains("git checkout feature/pr failed"));
         assert_ne!(current_branch(&repo).expect("current branch"), "feature/pr");
         let _ = fs::remove_dir_all(repo);
     }
