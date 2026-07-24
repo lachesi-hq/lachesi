@@ -8,14 +8,14 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-88-lac-errors-docs`
-- **Active item:** GitHub issue #88, terminal startup errors and current-repository workflow docs.
+- **Branch:** `main`
+- **Active item:** none; GitHub issues #86, #87, and #88 are shipped and closed.
 - **Blockers:** none.
 - **Uncommitted work:** none.
 
 ## Last shipped
 
-`31e70e3` - add TUI install recipes.
+`b12fe0c` - document `lac` current-repository startup and improve terminal startup errors.
 
 ## Next item
 
