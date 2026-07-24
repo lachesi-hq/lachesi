@@ -26,6 +26,14 @@ tauri-dev:
 tui:
     pnpm run tui
 
+# Build the terminal UI release binary.
+tui-build:
+    pnpm run tui:build
+
+# Build and install the terminal UI as `lac` in ~/.local/bin.
+tui-install:
+    pnpm run tui:install
+
 # Typecheck + Vite production build.
 build:
     pnpm run build

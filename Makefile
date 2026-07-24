@@ -4,11 +4,11 @@
 # package.json / cargo / tauri commands so package.json stays authoritative.
 
 .DEFAULT_GOAL := help
-.PHONY: help dev tauri-dev tui build typecheck lint test test-tauri check bundle-windows
+.PHONY: help dev tauri-dev tui tui-build tui-install build typecheck lint test test-tauri check bundle-windows
 
 # List available recipes (runs by default).
 help:
-	@echo "Lachesi recipes: dev tauri-dev tui build typecheck lint test test-tauri check bundle-windows"
+	@echo "Lachesi recipes: dev tauri-dev tui tui-build tui-install build typecheck lint test test-tauri check bundle-windows"
 
 # Start the Vite dev server (browser mock IPC).
 dev:
@@ -22,6 +22,14 @@ tauri-dev:
 # Start the terminal UI.
 tui:
 	pnpm run tui
+
+# Build the terminal UI release binary.
+tui-build:
+	pnpm run tui:build
+
+# Build and install the terminal UI as `lac` in ~/.local/bin.
+tui-install:
+	pnpm run tui:install
 
 # Typecheck + Vite production build.
 build:
