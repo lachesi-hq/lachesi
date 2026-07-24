@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`f4291a6` - show pull request diff without checkout in TUI.
+`339381b` - show TUI diff in dedicated page.
 
 ## Next item
 
