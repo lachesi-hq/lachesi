@@ -8,14 +8,14 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `codex/tui-roadmap`
+- **Branch:** `main`
 - **Active item:** `.docflow/plan/todo/0002-terminal-ui-foundation.md` for terminal UI issues #80-#84.
 - **Blockers:** none.
 - **Uncommitted work:** none.
 
 ## Last shipped
 
-`5e0993f` - render TUI diffs with delta pager.
+`31e70e3` - add TUI install recipes.
 
 ## Next item
 

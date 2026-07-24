@@ -27,3 +27,4 @@ Append one row per commit. Newest at the bottom.
 | 2026-07-24 | `339381b` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Reworked terminal diff review into a dedicated full-page view with a file list and per-file diff content. |
 | 2026-07-24 | `3a53457` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Added a terminal diff display mode toggle between unified and side-by-side file views. |
 | 2026-07-24 | `5e0993f` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Rendered terminal PR diffs through the delta pager to match the local lazygit diff style. |
+| 2026-07-24 | `31e70e3` | `main` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Added release build and local `lac` install recipes for the terminal UI. |
