@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`339381b` - show TUI diff in dedicated page.
+`3a53457` - add split TUI diff mode.
 
 ## Next item
 
