@@ -21,3 +21,4 @@ Append one row per commit. Newest at the bottom.
 | 2026-07-23 | `d9c1b0d` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Added terminal PR author metadata and open/draft/merged filters. |
 | 2026-07-23 | `3f65b76` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Moved terminal PR filtering into a visible mouse-clickable panel below repositories. |
 | 2026-07-23 | `4cf30c4` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Opened lazygit from the TUI on the selected pull request source branch. |
+| 2026-07-24 | `364f5b8` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Let Git attempt lazygit branch checkout when local changes do not conflict. |

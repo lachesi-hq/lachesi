@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`4cf30c4` - open lazygit on the selected pull request branch.
+`364f5b8` - let Git decide lazygit branch checkout safety.
 
 ## Next item
 
