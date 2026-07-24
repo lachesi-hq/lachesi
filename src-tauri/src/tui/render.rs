@@ -33,6 +33,7 @@ pub struct TuiState<'a> {
     pub detail_scroll: usize,
     pub ai_review_scroll: usize,
     pub diff_scroll: usize,
+    pub selected_diff_file: usize,
     pub error: Option<&'a str>,
     pub status: &'a str,
 }
@@ -101,6 +102,7 @@ pub enum MouseTarget {
     Repository(usize),
     PullRequest(usize),
     PrFilter(PrListFilter),
+    DiffFile(usize),
 }
 
 const SURFACE: Color = Color::Rgb(13, 17, 23);
@@ -122,19 +124,35 @@ pub fn render(frame: &mut Frame<'_>, state: TuiState<'_>) {
 
     render_header(frame, header);
 
+    if state.detail_view == DetailView::Diff {
+        render_diff_page(frame, body, state);
+        render_footer(frame, footer, state);
+        return;
+    }
+
     let [left, review] = *body_areas().split(body) else {
         return;
     };
 
     render_left_panel(frame, left, state);
     render_review(frame, review, state);
-    render_footer(frame, footer, state.status);
+    render_footer(frame, footer, state);
 }
 
 pub fn mouse_target(area: Rect, x: u16, y: u16, state: TuiState<'_>) -> Option<MouseTarget> {
     let [_, body, _] = *vertical_areas().split(area) else {
         return None;
     };
+    if state.detail_view == DetailView::Diff {
+        let [files, _] = *diff_page_areas().split(body) else {
+            return None;
+        };
+        let file_count = parse_diff_files(state.diff).len();
+        let offset = diff_file_list_offset(file_count, files.height, state.selected_diff_file);
+        return list_index_at(files, x, y, file_count.saturating_sub(offset))
+            .map(|index| MouseTarget::DiffFile(index + offset));
+    }
+
     let [left, review] = *body_areas().split(body) else {
         return None;
     };
@@ -212,6 +230,12 @@ fn detail_areas() -> Layout {
     Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+}
+
+fn diff_page_areas() -> Layout {
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
 }
 
 fn rect_contains(area: Rect, x: u16, y: u16) -> bool {
@@ -353,6 +377,122 @@ fn render_review(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     };
     render_pull_requests(frame, pr_list, state);
     render_detail(frame, detail, state);
+}
+
+fn render_diff_page(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
+    let [files_area, diff_area] = *diff_page_areas().split(area) else {
+        return;
+    };
+    let files = parse_diff_files(state.diff);
+    render_diff_file_list(frame, files_area, &files, state.selected_diff_file);
+    render_diff_file(frame, diff_area, state, &files);
+}
+
+fn render_diff_file_list(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    files: &[DiffFileSection<'_>],
+    selected_file: usize,
+) {
+    let items = if files.is_empty() {
+        vec![ListItem::new(Span::styled("No diff loaded", muted_style()))]
+    } else {
+        let offset = diff_file_list_offset(files.len(), area.height, selected_file);
+        files
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .map(|(index, file)| {
+                let selected = index == selected_file.min(files.len().saturating_sub(1));
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        if selected { "> " } else { "  " },
+                        if selected {
+                            accent_style()
+                        } else {
+                            muted_style()
+                        },
+                    ),
+                    Span::styled(file.status_label(), file.status_style()),
+                    Span::styled(" ", muted_style()),
+                    Span::styled(
+                        file.display_path(),
+                        if selected {
+                            text_style().add_modifier(Modifier::BOLD)
+                        } else {
+                            text_style()
+                        },
+                    ),
+                    Span::styled(
+                        format!(" +{}/-{}", file.additions, file.deletions),
+                        muted_style(),
+                    ),
+                ]))
+            })
+            .collect()
+    };
+    let list = List::new(items)
+        .style(panel_style())
+        .block(panel_block("Files *", true));
+    frame.render_widget(list, area);
+}
+
+fn render_diff_file(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: TuiState<'_>,
+    files: &[DiffFileSection<'_>],
+) {
+    let mut lines = Vec::new();
+    if let Some(detail) = state.detail {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("#{} ", detail.id),
+                info_style().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                detail.title.clone(),
+                text_style().add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(detail.source_branch.clone(), branch_style()),
+            Span::styled(" -> ", muted_style()),
+            Span::styled(detail.destination_branch.clone(), branch_style()),
+        ]));
+        lines.push(Line::from(""));
+    }
+
+    if let Some(file) = files.get(state.selected_diff_file.min(files.len().saturating_sub(1))) {
+        lines.push(Line::from(vec![
+            Span::styled(file.status_label(), file.status_style()),
+            Span::styled(" ", muted_style()),
+            Span::styled(
+                file.display_path(),
+                text_style().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  +{}/-{}", file.additions, file.deletions),
+                muted_style(),
+            ),
+        ]));
+        lines.push(Line::from(""));
+        append_diff_file_lines(&mut lines, file, content_width(area));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Load a pull request to view its diff.",
+            muted_style(),
+        )));
+    }
+
+    let content_len = lines.len();
+    let scroll = clamped_scroll(content_len, area.height, state.diff_scroll);
+    let diff = Paragraph::new(lines)
+        .scroll((scroll as u16, 0))
+        .style(panel_style())
+        .block(panel_block("Diff *", true));
+    frame.render_widget(diff, area);
+    render_scrollbar(frame, area, content_len, scroll);
 }
 
 fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
@@ -620,7 +760,55 @@ fn render_diff_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     render_scrollbar(frame, area, content_len, scroll);
 }
 
-fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
+#[derive(Debug, Clone)]
+struct DiffFileSection<'a> {
+    old_path: &'a str,
+    new_path: &'a str,
+    lines: Vec<&'a str>,
+    additions: usize,
+    deletions: usize,
+}
+
+impl DiffFileSection<'_> {
+    fn display_path(&self) -> &str {
+        if self.new_path == "/dev/null" {
+            self.old_path
+        } else {
+            self.new_path
+        }
+    }
+
+    fn status_label(&self) -> &'static str {
+        if self.old_path == "/dev/null" {
+            "[A]"
+        } else if self.new_path == "/dev/null" {
+            "[D]"
+        } else if self.old_path != self.new_path {
+            "[R]"
+        } else {
+            "[M]"
+        }
+    }
+
+    fn status_style(&self) -> Style {
+        if self.old_path == "/dev/null" {
+            success_style()
+        } else if self.new_path == "/dev/null" {
+            error_style()
+        } else if self.old_path != self.new_path {
+            info_style()
+        } else {
+            accent_style()
+        }
+    }
+}
+
+fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
+    let diff_action = if state.detail_view == DetailView::Diff {
+        " close diff  "
+    } else {
+        " diff  "
+    };
     let footer = Paragraph::new(Line::from(vec![
         Span::styled("q", accent_style()),
         Span::styled(" quit  ", muted_style()),
@@ -641,7 +829,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         Span::styled("f", accent_style()),
         Span::styled(" filter  ", muted_style()),
         Span::styled("g", accent_style()),
-        Span::styled(" diff  ", muted_style()),
+        Span::styled(diff_action, muted_style()),
         Span::styled("v", accent_style()),
         Span::styled(" pane  ", muted_style()),
         Span::styled("y", accent_style()),
@@ -650,7 +838,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         Span::styled(" scroll  ", muted_style()),
         Span::styled("r", accent_style()),
         Span::styled(" refresh  ", muted_style()),
-        Span::styled(status, info_style()),
+        Span::styled(state.status, info_style()),
     ]))
     .style(base_style());
     frame.render_widget(footer, area);
@@ -714,6 +902,93 @@ fn append_diff_lines(lines: &mut Vec<Line<'_>>, diff: Option<&str>, width: usize
         for wrapped in wrap_plain_line(line, width) {
             lines.push(Line::from(style_diff_line(wrapped.as_str())));
         }
+    }
+}
+
+fn append_diff_file_lines(lines: &mut Vec<Line<'_>>, file: &DiffFileSection<'_>, width: usize) {
+    for line in &file.lines {
+        for wrapped in wrap_plain_line(line, width) {
+            lines.push(Line::from(style_diff_line(wrapped.as_str())));
+        }
+    }
+}
+
+fn parse_diff_files(diff: Option<&str>) -> Vec<DiffFileSection<'_>> {
+    let Some(diff) = diff.map(str::trim).filter(|diff| !diff.is_empty()) else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    let mut current: Option<DiffFileSection<'_>> = None;
+
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") {
+            if let Some(file) = current.take() {
+                files.push(file);
+            }
+            let (old_path, new_path) = parse_diff_git_paths(line);
+            current = Some(DiffFileSection {
+                old_path,
+                new_path,
+                lines: vec![line],
+                additions: 0,
+                deletions: 0,
+            });
+            continue;
+        }
+
+        let file = current.get_or_insert_with(|| DiffFileSection {
+            old_path: "diff",
+            new_path: "diff",
+            lines: Vec::new(),
+            additions: 0,
+            deletions: 0,
+        });
+        if let Some(path) = line.strip_prefix("--- ") {
+            file.old_path = normalize_diff_path(path);
+        } else if let Some(path) = line.strip_prefix("+++ ") {
+            file.new_path = normalize_diff_path(path);
+        } else if line.starts_with('+') {
+            file.additions += 1;
+        } else if line.starts_with('-') {
+            file.deletions += 1;
+        }
+        file.lines.push(line);
+    }
+
+    if let Some(file) = current {
+        files.push(file);
+    }
+    files
+}
+
+fn parse_diff_git_paths(line: &str) -> (&str, &str) {
+    let mut parts = line.split_whitespace();
+    let _ = parts.next();
+    let _ = parts.next();
+    let old_path = parts.next().map(normalize_diff_path).unwrap_or("unknown");
+    let new_path = parts.next().map(normalize_diff_path).unwrap_or(old_path);
+    (old_path, new_path)
+}
+
+fn normalize_diff_path(path: &str) -> &str {
+    let trimmed = path.trim();
+    if trimmed == "/dev/null" {
+        return trimmed;
+    }
+    trimmed
+        .strip_prefix("a/")
+        .or_else(|| trimmed.strip_prefix("b/"))
+        .unwrap_or(trimmed)
+}
+
+fn diff_file_list_offset(file_count: usize, area_height: u16, selected_file: usize) -> usize {
+    let visible_rows = usize::from(area_height.saturating_sub(2)).max(1);
+    if selected_file < visible_rows {
+        0
+    } else {
+        selected_file
+            .saturating_sub(visible_rows - 1)
+            .min(file_count.saturating_sub(visible_rows))
     }
 }
 
@@ -1035,6 +1310,7 @@ mod tests {
                         detail_scroll: 0,
                         ai_review_scroll: 0,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Ready",
                     },
@@ -1096,6 +1372,7 @@ mod tests {
                         detail_scroll: 0,
                         ai_review_scroll: 0,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Ready",
                     },
@@ -1185,6 +1462,7 @@ mod tests {
                         detail_scroll: 0,
                         ai_review_scroll: 0,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Ready",
                     },
@@ -1255,6 +1533,7 @@ mod tests {
                         detail_scroll: 0,
                         ai_review_scroll: 0,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1299,6 +1578,7 @@ mod tests {
                         detail_scroll: 0,
                         ai_review_scroll: 0,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Composing",
                     },
@@ -1376,6 +1656,7 @@ mod tests {
             detail_scroll: 0,
             ai_review_scroll: 0,
             diff_scroll: 0,
+            selected_diff_file: 0,
             error: None,
             status: "Ready",
         };
@@ -1412,6 +1693,7 @@ mod tests {
             detail_scroll: 0,
             ai_review_scroll: 0,
             diff_scroll: 0,
+            selected_diff_file: 0,
             error: None,
             status: "Ready",
         };
@@ -1474,6 +1756,7 @@ mod tests {
                         detail_scroll: 0,
                         ai_review_scroll: 0,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1534,6 +1817,7 @@ mod tests {
                         detail_scroll: 0,
                         ai_review_scroll: 0,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1597,6 +1881,7 @@ mod tests {
                         detail_scroll: 0,
                         ai_review_scroll: 10,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1655,6 +1940,7 @@ mod tests {
                         detail_scroll: 0,
                         ai_review_scroll: usize::MAX,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1716,6 +2002,7 @@ mod tests {
                         detail_scroll: usize::MAX,
                         ai_review_scroll: usize::MAX,
                         diff_scroll: 0,
+                        selected_diff_file: 0,
                         error: None,
                         status: "Loaded",
                     },

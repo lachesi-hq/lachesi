@@ -84,6 +84,7 @@ struct TuiApp {
     detail_scroll: usize,
     ai_review_scroll: usize,
     diff_scroll: usize,
+    selected_diff_file: usize,
     error: Option<String>,
     status: String,
     should_quit: bool,
@@ -130,6 +131,7 @@ impl TuiApp {
             detail_scroll: 0,
             ai_review_scroll: 0,
             diff_scroll: 0,
+            selected_diff_file: 0,
             error: None,
             status: "Ready".to_string(),
             should_quit: false,
@@ -169,9 +171,17 @@ impl TuiApp {
         }
         match mouse.kind {
             MouseEventKind::ScrollUp => {
+                if self.detail_view == DetailView::Diff {
+                    self.scroll_active_detail(-3);
+                    return;
+                }
                 self.scroll_detail_at(area, mouse.column, mouse.row, -3);
             }
             MouseEventKind::ScrollDown => {
+                if self.detail_view == DetailView::Diff {
+                    self.scroll_active_detail(3);
+                    return;
+                }
                 self.scroll_detail_at(area, mouse.column, mouse.row, 3);
             }
             MouseEventKind::Down(MouseButton::Left) => {
@@ -179,6 +189,7 @@ impl TuiApp {
                     Some(MouseTarget::Repository(index)) => self.select_repo(index),
                     Some(MouseTarget::PullRequest(index)) => self.select_pr(index),
                     Some(MouseTarget::PrFilter(filter)) => self.set_pr_filter(filter),
+                    Some(MouseTarget::DiffFile(index)) => self.select_diff_file(index),
                     None => {
                         if let Some(view) =
                             detail_view_target(area, mouse.column, mouse.row, self.detail_view)
@@ -226,7 +237,7 @@ impl TuiApp {
         match self.focus {
             FocusPane::Repositories => self.select_next_repo(),
             FocusPane::PullRequests => self.select_next_pr(),
-            FocusPane::Diff => self.scroll_active_detail(1),
+            FocusPane::Diff => self.select_next_diff_file(),
         }
     }
 
@@ -234,7 +245,7 @@ impl TuiApp {
         match self.focus {
             FocusPane::Repositories => self.select_previous_repo(),
             FocusPane::PullRequests => self.select_previous_pr(),
-            FocusPane::Diff => self.scroll_active_detail(-1),
+            FocusPane::Diff => self.select_previous_diff_file(),
         }
     }
 
@@ -290,6 +301,39 @@ impl TuiApp {
         if let Some(pr) = self.pull_requests.get(index) {
             self.status = format!("Selected PR #{}; press enter to load", pr.id);
         }
+    }
+
+    fn select_next_diff_file(&mut self) {
+        let file_count = diff_file_count(self.diff.as_deref());
+        if file_count == 0 {
+            self.selected_diff_file = 0;
+            return;
+        }
+        let previous = self.selected_diff_file;
+        self.selected_diff_file = (self.selected_diff_file + 1).min(file_count - 1);
+        if self.selected_diff_file != previous {
+            self.diff_scroll = 0;
+            self.status = "Selected next diff file".to_string();
+        }
+    }
+
+    fn select_previous_diff_file(&mut self) {
+        let previous = self.selected_diff_file;
+        self.selected_diff_file = self.selected_diff_file.saturating_sub(1);
+        if self.selected_diff_file != previous {
+            self.diff_scroll = 0;
+            self.status = "Selected previous diff file".to_string();
+        }
+    }
+
+    fn select_diff_file(&mut self, index: usize) {
+        if index >= diff_file_count(self.diff.as_deref()) {
+            return;
+        }
+        self.focus = FocusPane::Diff;
+        self.selected_diff_file = index;
+        self.diff_scroll = 0;
+        self.status = "Selected diff file".to_string();
     }
 
     fn cycle_pr_filter(&mut self) {
@@ -440,6 +484,7 @@ impl TuiApp {
                     self.error = Some(format!("Diff failed: {error}"));
                 })
                 .ok();
+                self.selected_diff_file = 0;
                 self.detail = Some(detail);
                 self.drafts.clear();
                 self.composer = None;
@@ -603,7 +648,7 @@ impl TuiApp {
     fn toggle_detail_view(&mut self) {
         self.detail_view = match self.detail_view {
             DetailView::PullRequest => DetailView::AiReview,
-            DetailView::AiReview => DetailView::Diff,
+            DetailView::AiReview => DetailView::PullRequest,
             DetailView::Diff => DetailView::PullRequest,
         };
         if self.detail_view == DetailView::AiReview {
@@ -674,9 +719,16 @@ impl TuiApp {
 
     fn reset_diff_state(&mut self) {
         self.diff_scroll = 0;
+        self.selected_diff_file = 0;
     }
 
     fn open_diff_view(&mut self) {
+        if self.detail_view == DetailView::Diff {
+            self.detail_view = DetailView::PullRequest;
+            self.focus = FocusPane::PullRequests;
+            self.status = "Closed PR diff".to_string();
+            return;
+        }
         self.detail_view = DetailView::Diff;
         self.focus = FocusPane::Diff;
         self.load_selected_pr_for_view(DetailView::Diff);
@@ -965,6 +1017,7 @@ impl TuiApp {
             detail_scroll: self.detail_scroll,
             ai_review_scroll: self.ai_review_scroll,
             diff_scroll: self.diff_scroll,
+            selected_diff_file: self.selected_diff_file,
             error: self.error.as_deref(),
             status: self.status.as_str(),
         }
@@ -1011,6 +1064,19 @@ fn ai_provider_label(provider: AiProvider) -> &'static str {
 
 fn default_review_prompt() -> String {
     DEFAULT_REVIEW_PROMPT.trim().to_string()
+}
+
+fn diff_file_count(diff: Option<&str>) -> usize {
+    let count = diff
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.starts_with("diff --git "))
+        .count();
+    if count == 0 && diff.unwrap_or_default().trim().is_empty() {
+        0
+    } else {
+        count.max(1)
+    }
 }
 
 #[cfg(test)]
@@ -1130,6 +1196,35 @@ mod tests {
         );
         assert_eq!(app.detail_view, DetailView::AiReview);
         assert_eq!(app.ai_review_scroll, 3);
+    }
+
+    #[test]
+    fn diff_view_toggle_opens_and_closes_full_page() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+
+        app.handle_key(KeyCode::Char('g'));
+        assert_eq!(app.detail_view, DetailView::Diff);
+        assert_eq!(app.focus, FocusPane::Diff);
+
+        app.handle_key(KeyCode::Char('g'));
+        assert_eq!(app.detail_view, DetailView::PullRequest);
+        assert_eq!(app.focus, FocusPane::PullRequests);
+    }
+
+    #[test]
+    fn diff_view_selection_moves_between_files() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.detail_view = DetailView::Diff;
+        app.focus = FocusPane::Diff;
+        app.diff =
+            Some("diff --git a/a.ts b/a.ts\n+one\ndiff --git a/b.ts b/b.ts\n+two\n".to_string());
+
+        app.handle_key(KeyCode::Char('j'));
+        assert_eq!(app.selected_diff_file, 1);
+        assert_eq!(app.diff_scroll, 0);
+
+        app.handle_key(KeyCode::Char('k'));
+        assert_eq!(app.selected_diff_file, 0);
     }
 
     #[test]
