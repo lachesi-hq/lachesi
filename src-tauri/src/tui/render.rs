@@ -8,9 +8,6 @@ use ratatui::{
     },
 };
 
-use crate::commands::repositories::{
-    RepositoryFileEntry, RepositoryFileStatus, RepositoryWorktreeState, RepositoryWorktreeStatus,
-};
 use crate::config::{RepoRef, ReviewProvider};
 use crate::services::bitbucket::{PrComment, PullRequestDetail, PullRequestSummary};
 use crate::services::review::{AiReviewRunState, AiReviewRunStatus};
@@ -35,12 +32,7 @@ pub struct TuiState<'a> {
     pub detail_view: DetailView,
     pub detail_scroll: usize,
     pub ai_review_scroll: usize,
-    pub git_worktree: Option<&'a RepositoryWorktreeState>,
-    pub git_files: &'a [RepositoryFileEntry],
-    pub git_selected_file: usize,
-    pub git_diff: Option<&'a str>,
-    pub git_scroll: usize,
-    pub git_pr_branch: Option<&'a str>,
+    pub diff_scroll: usize,
     pub error: Option<&'a str>,
     pub status: &'a str,
 }
@@ -55,14 +47,14 @@ pub struct DraftComment {
 pub enum FocusPane {
     Repositories,
     PullRequests,
-    Git,
+    Diff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailView {
     PullRequest,
     AiReview,
-    Git,
+    Diff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,8 +170,8 @@ pub fn detail_view_target(area: Rect, x: u16, y: u16, side_view: DetailView) -> 
     if rect_contains(pull_request, x, y) {
         Some(DetailView::PullRequest)
     } else if rect_contains(side_pane, x, y) {
-        Some(if side_view == DetailView::Git {
-            DetailView::Git
+        Some(if side_view == DetailView::Diff {
+            DetailView::Diff
         } else {
             DetailView::AiReview
         })
@@ -425,8 +417,8 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
         return;
     };
     render_pull_request_detail(frame, pull_request, state);
-    if state.detail_view == DetailView::Git {
-        render_git_detail(frame, side_pane, state);
+    if state.detail_view == DetailView::Diff {
+        render_diff_detail(frame, side_pane, state);
     } else {
         render_ai_review_detail(frame, side_pane, state);
     }
@@ -585,120 +577,45 @@ fn render_ai_review_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_
     render_scrollbar(frame, area, content_len, scroll);
 }
 
-fn render_git_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
+fn render_diff_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     let mut lines = Vec::new();
-    match state.git_worktree {
-        Some(worktree) => {
-            lines.push(Line::from(vec![
-                Span::styled("Repo: ", muted_style()),
-                Span::styled(
-                    format!("{}/{}", worktree.workspace, worktree.repo),
-                    text_style().add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("Current: ", muted_style()),
-                Span::styled(current_git_ref(worktree), branch_style()),
-                Span::styled(" | ", muted_style()),
-                Span::styled(
-                    repository_status_label(&worktree.status),
-                    repository_status_style(&worktree.status),
-                ),
-            ]));
-            if let Some(branch) = state.git_pr_branch {
-                lines.push(Line::from(vec![
-                    Span::styled("PR branch: ", muted_style()),
-                    Span::styled(branch, branch_style()),
-                ]));
-            }
-            if let Some(path) = worktree.local_path.as_deref() {
-                lines.push(Line::from(vec![
-                    Span::styled("Path: ", muted_style()),
-                    Span::styled(path, text_style()),
-                ]));
-            }
-            if let Some(error) = worktree.error.as_deref() {
-                lines.push(Line::from(vec![
-                    Span::styled("Git error: ", error_style().add_modifier(Modifier::BOLD)),
-                    Span::styled(error, error_style()),
-                ]));
-            }
-        }
-        None => {
-            lines.push(Line::from("Open Git view to load repository state."));
-        }
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("Actions: ", accent_style()),
-        Span::styled(
-            "b checkout PR  F fetch  s stash  u pull  r refresh",
-            text_style(),
-        ),
-    ]));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Changed files:", accent_style())));
-
-    if state.git_files.is_empty() {
-        lines.push(Line::from(Span::styled("No local changes.", muted_style())));
+    if let Some(detail) = state.detail {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("#{} ", detail.id),
+                info_style().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                detail.title.clone(),
+                text_style().add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(detail.source_branch.clone(), branch_style()),
+            Span::styled(" -> ", muted_style()),
+            Span::styled(detail.destination_branch.clone(), branch_style()),
+        ]));
+        lines.push(Line::from(""));
     } else {
-        for (index, file) in state.git_files.iter().enumerate().take(12) {
-            let selected = index == state.git_selected_file;
-            lines.push(Line::from(vec![
-                Span::styled(
-                    if selected { "> " } else { "  " },
-                    if selected {
-                        accent_style()
-                    } else {
-                        muted_style()
-                    },
-                ),
-                Span::styled(
-                    format!("[{}] ", git_file_status_label(&file.status)),
-                    git_file_status_style(&file.status),
-                ),
-                Span::styled(
-                    file.path.as_str(),
-                    if selected {
-                        text_style().add_modifier(Modifier::BOLD)
-                    } else {
-                        text_style()
-                    },
-                ),
-            ]));
-        }
-        if state.git_files.len() > 12 {
-            lines.push(Line::from(Span::styled(
-                format!("... {} more file(s)", state.git_files.len() - 12),
-                muted_style(),
-            )));
-        }
+        lines.push(Line::from(Span::styled(
+            "Load a pull request to view its diff.",
+            muted_style(),
+        )));
+        lines.push(Line::from(""));
     }
-
-    lines.push(Line::from(""));
-    let selected_path = state
-        .git_files
-        .get(state.git_selected_file)
-        .map(|file| file.path.as_str())
-        .unwrap_or("no file selected");
-    lines.push(Line::from(vec![
-        Span::styled("Diff: ", accent_style()),
-        Span::styled(selected_path, text_style()),
-    ]));
-    append_git_diff_lines(&mut lines, state.git_diff, content_width(area));
+    append_diff_lines(&mut lines, state.diff, content_width(area));
 
     let content_len = lines.len();
-    let scroll = clamped_scroll(content_len, area.height, state.git_scroll);
-    let title = if state.detail_view == DetailView::Git {
-        "Git *"
+    let scroll = clamped_scroll(content_len, area.height, state.diff_scroll);
+    let title = if state.detail_view == DetailView::Diff {
+        "Diff *"
     } else {
-        "Git"
+        "Diff"
     };
     let detail = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
         .style(panel_style())
-        .block(panel_block(title, state.detail_view == DetailView::Git));
+        .block(panel_block(title, state.detail_view == DetailView::Diff));
     frame.render_widget(detail, area);
     render_scrollbar(frame, area, content_len, scroll);
 }
@@ -724,9 +641,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         Span::styled("f", accent_style()),
         Span::styled(" filter  ", muted_style()),
         Span::styled("g", accent_style()),
-        Span::styled(" git  ", muted_style()),
-        Span::styled("b/F/s/u", accent_style()),
-        Span::styled(" branch/fetch/stash/pull  ", muted_style()),
+        Span::styled(" diff  ", muted_style()),
         Span::styled("v", accent_style()),
         Span::styled(" pane  ", muted_style()),
         Span::styled("y", accent_style()),
@@ -790,22 +705,19 @@ fn append_ai_review_output(lines: &mut Vec<Line<'_>>, output: Option<&str>, widt
     }
 }
 
-fn append_git_diff_lines(lines: &mut Vec<Line<'_>>, diff: Option<&str>, width: usize) {
+fn append_diff_lines(lines: &mut Vec<Line<'_>>, diff: Option<&str>, width: usize) {
     let Some(diff) = diff.map(str::trim).filter(|diff| !diff.is_empty()) else {
-        lines.push(Line::from(Span::styled(
-            "No diff for selected file.",
-            muted_style(),
-        )));
+        lines.push(Line::from(Span::styled("Diff not loaded.", muted_style())));
         return;
     };
-    for line in diff.lines().take(120) {
+    for line in diff.lines() {
         for wrapped in wrap_plain_line(line, width) {
-            lines.push(Line::from(style_git_diff_line(wrapped.as_str())));
+            lines.push(Line::from(style_diff_line(wrapped.as_str())));
         }
     }
 }
 
-fn style_git_diff_line(line: &str) -> Vec<Span<'static>> {
+fn style_diff_line(line: &str) -> Vec<Span<'static>> {
     if line.starts_with('+') && !line.starts_with("+++") {
         return vec![Span::styled(line.to_string(), success_style())];
     }
@@ -828,61 +740,6 @@ fn style_git_diff_line(line: &str) -> Vec<Span<'static>> {
         return vec![Span::styled(line.to_string(), muted_style())];
     }
     vec![Span::styled(line.to_string(), text_style())]
-}
-
-fn current_git_ref(worktree: &RepositoryWorktreeState) -> String {
-    worktree
-        .current_branch
-        .clone()
-        .or_else(|| {
-            worktree
-                .detached_head
-                .as_ref()
-                .map(|head| format!("detached {head}"))
-        })
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn repository_status_label(status: &RepositoryWorktreeStatus) -> &'static str {
-    match status {
-        RepositoryWorktreeStatus::Clean => "clean",
-        RepositoryWorktreeStatus::Dirty => "dirty",
-        RepositoryWorktreeStatus::MissingPath => "missing path",
-        RepositoryWorktreeStatus::InvalidRepo => "invalid repo",
-        RepositoryWorktreeStatus::Error => "error",
-    }
-}
-
-fn repository_status_style(status: &RepositoryWorktreeStatus) -> Style {
-    match status {
-        RepositoryWorktreeStatus::Clean => success_style(),
-        RepositoryWorktreeStatus::Dirty => accent_style(),
-        RepositoryWorktreeStatus::MissingPath
-        | RepositoryWorktreeStatus::InvalidRepo
-        | RepositoryWorktreeStatus::Error => error_style(),
-    }
-}
-
-fn git_file_status_label(status: &RepositoryFileStatus) -> &'static str {
-    match status {
-        RepositoryFileStatus::Modified => "M",
-        RepositoryFileStatus::Added => "A",
-        RepositoryFileStatus::Deleted => "D",
-        RepositoryFileStatus::Renamed => "R",
-        RepositoryFileStatus::Untracked => "?",
-        RepositoryFileStatus::Conflicted => "!",
-        RepositoryFileStatus::Unchanged => " ",
-    }
-}
-
-fn git_file_status_style(status: &RepositoryFileStatus) -> Style {
-    match status {
-        RepositoryFileStatus::Modified => accent_style(),
-        RepositoryFileStatus::Added | RepositoryFileStatus::Untracked => success_style(),
-        RepositoryFileStatus::Deleted | RepositoryFileStatus::Conflicted => error_style(),
-        RepositoryFileStatus::Renamed => info_style(),
-        RepositoryFileStatus::Unchanged => muted_style(),
-    }
 }
 
 fn append_description_lines<'a>(lines: &mut Vec<Line<'a>>, description: &str, width: usize) {
@@ -1177,12 +1034,7 @@ mod tests {
                         detail_view: DetailView::PullRequest,
                         detail_scroll: 0,
                         ai_review_scroll: 0,
-                        git_worktree: None,
-                        git_files: &[],
-                        git_selected_file: 0,
-                        git_diff: None,
-                        git_scroll: 0,
-                        git_pr_branch: None,
+                        diff_scroll: 0,
                         error: None,
                         status: "Ready",
                     },
@@ -1243,12 +1095,7 @@ mod tests {
                         detail_view: DetailView::PullRequest,
                         detail_scroll: 0,
                         ai_review_scroll: 0,
-                        git_worktree: None,
-                        git_files: &[],
-                        git_selected_file: 0,
-                        git_diff: None,
-                        git_scroll: 0,
-                        git_pr_branch: None,
+                        diff_scroll: 0,
                         error: None,
                         status: "Ready",
                     },
@@ -1337,12 +1184,7 @@ mod tests {
                         detail_view: DetailView::PullRequest,
                         detail_scroll: 0,
                         ai_review_scroll: 0,
-                        git_worktree: None,
-                        git_files: &[],
-                        git_selected_file: 0,
-                        git_diff: None,
-                        git_scroll: 0,
-                        git_pr_branch: None,
+                        diff_scroll: 0,
                         error: None,
                         status: "Ready",
                     },
@@ -1412,12 +1254,7 @@ mod tests {
                         detail_view: DetailView::PullRequest,
                         detail_scroll: 0,
                         ai_review_scroll: 0,
-                        git_worktree: None,
-                        git_files: &[],
-                        git_selected_file: 0,
-                        git_diff: None,
-                        git_scroll: 0,
-                        git_pr_branch: None,
+                        diff_scroll: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1461,12 +1298,7 @@ mod tests {
                         detail_view: DetailView::PullRequest,
                         detail_scroll: 0,
                         ai_review_scroll: 0,
-                        git_worktree: None,
-                        git_files: &[],
-                        git_selected_file: 0,
-                        git_diff: None,
-                        git_scroll: 0,
-                        git_pr_branch: None,
+                        diff_scroll: 0,
                         error: None,
                         status: "Composing",
                     },
@@ -1543,12 +1375,7 @@ mod tests {
             detail_view: DetailView::PullRequest,
             detail_scroll: 0,
             ai_review_scroll: 0,
-            git_worktree: None,
-            git_files: &[],
-            git_selected_file: 0,
-            git_diff: None,
-            git_scroll: 0,
-            git_pr_branch: None,
+            diff_scroll: 0,
             error: None,
             status: "Ready",
         };
@@ -1584,12 +1411,7 @@ mod tests {
             detail_view: DetailView::PullRequest,
             detail_scroll: 0,
             ai_review_scroll: 0,
-            git_worktree: None,
-            git_files: &[],
-            git_selected_file: 0,
-            git_diff: None,
-            git_scroll: 0,
-            git_pr_branch: None,
+            diff_scroll: 0,
             error: None,
             status: "Ready",
         };
@@ -1651,12 +1473,7 @@ mod tests {
                         detail_view: DetailView::AiReview,
                         detail_scroll: 0,
                         ai_review_scroll: 0,
-                        git_worktree: None,
-                        git_files: &[],
-                        git_selected_file: 0,
-                        git_diff: None,
-                        git_scroll: 0,
-                        git_pr_branch: None,
+                        diff_scroll: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1672,24 +1489,24 @@ mod tests {
     }
 
     #[test]
-    fn renders_git_detail_view() {
+    fn renders_pull_request_diff_view() {
         let backend = TestBackend::new(120, 48);
         let mut terminal = Terminal::new(backend).expect("terminal");
-        let worktree = RepositoryWorktreeState {
-            workspace: "lachesi-hq".to_string(),
-            repo: "lachesi".to_string(),
-            local_path: Some("/tmp/lachesi".to_string()),
-            status: RepositoryWorktreeStatus::Dirty,
-            current_branch: Some("main".to_string()),
-            detached_head: None,
-            dirty: true,
-            branches: Vec::new(),
-            error: None,
+        let detail = PullRequestDetail {
+            id: 12,
+            title: "Add terminal UI".to_string(),
+            description_raw: "Review in the terminal.".to_string(),
+            state: "OPEN".to_string(),
+            draft: false,
+            author_display_name: "fdg".to_string(),
+            reviewers: Vec::new(),
+            source_branch: "feature/tui".to_string(),
+            destination_branch: "main".to_string(),
+            source_commit_hash: None,
+            destination_commit_hash: None,
+            created_on: String::new(),
+            updated_on: String::new(),
         };
-        let files = vec![RepositoryFileEntry {
-            path: "src/App.tsx".to_string(),
-            status: RepositoryFileStatus::Modified,
-        }];
 
         terminal
             .draw(|frame| {
@@ -1698,30 +1515,25 @@ mod tests {
                     TuiState {
                         repos: &[],
                         selected_repo: 0,
-                        focus: FocusPane::Git,
+                        focus: FocusPane::Diff,
                         pull_requests: &[],
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
-                        detail: None,
+                        detail: Some(&detail),
                         comments: &[],
                         ai_reviewed_pr_ids: &[],
                         ai_review_running_pr_ids: &[],
-                        diff: None,
+                        diff: Some(
+                            "diff --git a/src/App.tsx b/src/App.tsx\n@@ -1 +1 @@\n-old\n+new\n",
+                        ),
                         drafts: &[],
                         composer: None,
                         ai_review: None,
                         ai_review_output: None,
-                        detail_view: DetailView::Git,
+                        detail_view: DetailView::Diff,
                         detail_scroll: 0,
                         ai_review_scroll: 0,
-                        git_worktree: Some(&worktree),
-                        git_files: &files,
-                        git_selected_file: 0,
-                        git_diff: Some(
-                            "diff --git a/src/App.tsx b/src/App.tsx\n@@ -1 +1 @@\n-old\n+new\n",
-                        ),
-                        git_scroll: 0,
-                        git_pr_branch: Some("feature/pr"),
+                        diff_scroll: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1730,10 +1542,10 @@ mod tests {
             .expect("draw");
 
         let text = buffer_text(&terminal);
-        assert!(text.contains("Git"));
-        assert!(text.contains("main"));
-        assert!(text.contains("feature/pr"));
-        assert!(text.contains("[M] src/App.tsx"));
+        assert!(text.contains("Diff"));
+        assert!(text.contains("#12 Add terminal UI"));
+        assert!(text.contains("feature/tui -> main"));
+        assert!(text.contains("diff --git a/src/App.tsx"));
         assert!(text.contains("+new"));
     }
 
@@ -1784,12 +1596,7 @@ mod tests {
                         detail_view: DetailView::AiReview,
                         detail_scroll: 0,
                         ai_review_scroll: 10,
-                        git_worktree: None,
-                        git_files: &[],
-                        git_selected_file: 0,
-                        git_diff: None,
-                        git_scroll: 0,
-                        git_pr_branch: None,
+                        diff_scroll: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1847,12 +1654,7 @@ mod tests {
                         detail_view: DetailView::AiReview,
                         detail_scroll: 0,
                         ai_review_scroll: usize::MAX,
-                        git_worktree: None,
-                        git_files: &[],
-                        git_selected_file: 0,
-                        git_diff: None,
-                        git_scroll: 0,
-                        git_pr_branch: None,
+                        diff_scroll: 0,
                         error: None,
                         status: "Loaded",
                     },
@@ -1913,12 +1715,7 @@ mod tests {
                         detail_view: DetailView::AiReview,
                         detail_scroll: usize::MAX,
                         ai_review_scroll: usize::MAX,
-                        git_worktree: None,
-                        git_files: &[],
-                        git_selected_file: 0,
-                        git_diff: None,
-                        git_scroll: 0,
-                        git_pr_branch: None,
+                        diff_scroll: 0,
                         error: None,
                         status: "Loaded",
                     },
