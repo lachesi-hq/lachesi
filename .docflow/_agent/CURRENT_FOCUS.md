@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`5e50f8e` - replace terminal lazygit with native git view.
+`f4291a6` - show pull request diff without checkout in TUI.
 
 ## Next item
 

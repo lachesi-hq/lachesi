@@ -23,3 +23,4 @@ Append one row per commit. Newest at the bottom.
 | 2026-07-23 | `4cf30c4` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Opened lazygit from the TUI on the selected pull request source branch. |
 | 2026-07-24 | `364f5b8` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Let Git attempt lazygit branch checkout when local changes do not conflict. |
 | 2026-07-24 | `5e50f8e` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Replaced external lazygit launch with a native terminal Git view backed by local repository commands. |
+| 2026-07-24 | `f4291a6` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Changed the terminal side pane to show the provider pull request diff without checking out branches or touching local worktrees. |
