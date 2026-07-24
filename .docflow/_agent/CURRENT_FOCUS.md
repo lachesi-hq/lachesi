@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`364f5b8` - let Git decide lazygit branch checkout safety.
+`5e50f8e` - replace terminal lazygit with native git view.
 
 ## Next item
 
