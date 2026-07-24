@@ -35,6 +35,7 @@ pub struct TuiState<'a> {
     pub diff_scroll: usize,
     pub selected_diff_file: usize,
     pub diff_view_mode: DiffViewMode,
+    pub rendered_diff_output: Option<&'a str>,
     pub error: Option<&'a str>,
     pub status: &'a str,
 }
@@ -259,6 +260,16 @@ fn diff_page_areas() -> Layout {
     Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+}
+
+pub fn diff_content_width_for_area(area: Rect) -> usize {
+    let [_, body, _] = *vertical_areas().split(area) else {
+        return 80;
+    };
+    let [_, diff_area] = *diff_page_areas().split(body) else {
+        return 80;
+    };
+    content_width(diff_area)
 }
 
 fn rect_contains(area: Rect, x: u16, y: u16) -> bool {
@@ -501,10 +512,16 @@ fn render_diff_file(
             Span::styled(format!("  {}", state.diff_view_mode.label()), muted_style()),
         ]));
         lines.push(Line::from(""));
-        match state.diff_view_mode {
-            DiffViewMode::Unified => append_diff_file_lines(&mut lines, file, content_width(area)),
-            DiffViewMode::Split => {
-                append_split_diff_file_lines(&mut lines, file, content_width(area))
+        if let Some(output) = state.rendered_diff_output {
+            append_pager_diff_lines(&mut lines, output);
+        } else {
+            match state.diff_view_mode {
+                DiffViewMode::Unified => {
+                    append_diff_file_lines(&mut lines, file, content_width(area))
+                }
+                DiffViewMode::Split => {
+                    append_split_diff_file_lines(&mut lines, file, content_width(area))
+                }
             }
         }
     } else {
@@ -944,6 +961,16 @@ fn append_diff_file_lines(lines: &mut Vec<Line<'_>>, file: &DiffFileSection<'_>,
     }
 }
 
+fn append_pager_diff_lines(lines: &mut Vec<Line<'_>>, output: &str) {
+    let trimmed = output.trim_end();
+    if trimmed.is_empty() {
+        return;
+    }
+    for line in trimmed.lines() {
+        lines.push(Line::from(ansi_spans(line)));
+    }
+}
+
 fn append_split_diff_file_lines(
     lines: &mut Vec<Line<'_>>,
     file: &DiffFileSection<'_>,
@@ -1065,6 +1092,205 @@ fn is_diff_meta_line(line: &str) -> bool {
         || line.starts_with("similarity index ")
         || line.starts_with("rename from ")
         || line.starts_with("rename to ")
+}
+
+fn ansi_spans(line: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut current = String::new();
+    let mut style = text_style();
+    let mut chars = line.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        if character == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            let mut sequence = String::new();
+            for next in chars.by_ref() {
+                if next.is_ascii_alphabetic() {
+                    if next == 'm' {
+                        push_ansi_span(&mut spans, &mut current, style);
+                        style = apply_sgr(sequence.as_str(), style);
+                    }
+                    break;
+                }
+                sequence.push(next);
+            }
+        } else {
+            current.push(character);
+        }
+    }
+
+    push_ansi_span(&mut spans, &mut current, style);
+    if spans.is_empty() {
+        spans.push(Span::styled(String::new(), text_style()));
+    }
+    spans
+}
+
+fn push_ansi_span(spans: &mut Vec<Span<'static>>, current: &mut String, style: Style) {
+    if current.is_empty() {
+        return;
+    }
+    spans.push(Span::styled(std::mem::take(current), style));
+}
+
+fn apply_sgr(sequence: &str, mut style: Style) -> Style {
+    let codes = parse_sgr_codes(sequence);
+    if codes.is_empty() {
+        return text_style();
+    }
+
+    let mut index = 0;
+    while index < codes.len() {
+        let code = codes[index];
+        match code {
+            0 => style = text_style(),
+            1 => style = style.add_modifier(Modifier::BOLD),
+            4 => style = style.add_modifier(Modifier::UNDERLINED),
+            22 => style = style.remove_modifier(Modifier::BOLD),
+            24 => style = style.remove_modifier(Modifier::UNDERLINED),
+            30..=37 | 90..=97 => {
+                style = style.fg(ansi_standard_color(code));
+            }
+            39 => style = style.fg(TEXT),
+            40..=47 | 100..=107 => {
+                style = style.bg(ansi_standard_bg_color(code));
+            }
+            49 => style = style.bg(SURFACE),
+            38 | 48 => {
+                if let Some((color, consumed)) = parse_extended_color(&codes[index..]) {
+                    style = if code == 38 {
+                        style.fg(color)
+                    } else {
+                        style.bg(color)
+                    };
+                    index += consumed;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    style
+}
+
+fn parse_sgr_codes(sequence: &str) -> Vec<u16> {
+    if sequence.trim().is_empty() {
+        return Vec::new();
+    }
+    sequence
+        .split(';')
+        .filter_map(|part| part.parse::<u16>().ok())
+        .collect()
+}
+
+fn parse_extended_color(codes: &[u16]) -> Option<(Color, usize)> {
+    match codes {
+        [_, 2, red, green, blue, ..] => Some((
+            Color::Rgb(
+                (*red).min(255) as u8,
+                (*green).min(255) as u8,
+                (*blue).min(255) as u8,
+            ),
+            5,
+        )),
+        [_, 5, color, ..] => Some((ansi_256_color((*color).min(255) as u8), 3)),
+        _ => None,
+    }
+}
+
+fn ansi_standard_color(code: u16) -> Color {
+    match code {
+        30 => Color::Black,
+        31 => ERROR,
+        32 => SUCCESS,
+        33 => ACCENT,
+        34 => INFO,
+        35 => Color::Magenta,
+        36 => Color::Cyan,
+        37 => TEXT,
+        90 => MUTED,
+        91 => Color::LightRed,
+        92 => Color::LightGreen,
+        93 => Color::LightYellow,
+        94 => Color::LightBlue,
+        95 => Color::LightMagenta,
+        96 => Color::LightCyan,
+        97 => Color::White,
+        _ => TEXT,
+    }
+}
+
+fn ansi_standard_bg_color(code: u16) -> Color {
+    match code {
+        40 => Color::Black,
+        41 => Color::Rgb(63, 0, 1),
+        42 => Color::Rgb(0, 40, 0),
+        43 => Color::Rgb(64, 48, 0),
+        44 => Color::Rgb(0, 24, 64),
+        45 => Color::Rgb(48, 0, 64),
+        46 => Color::Rgb(0, 48, 64),
+        47 => Color::Gray,
+        100 => Color::DarkGray,
+        101 => Color::LightRed,
+        102 => Color::LightGreen,
+        103 => Color::LightYellow,
+        104 => Color::LightBlue,
+        105 => Color::LightMagenta,
+        106 => Color::LightCyan,
+        107 => Color::White,
+        _ => SURFACE,
+    }
+}
+
+fn ansi_256_color(code: u8) -> Color {
+    match code {
+        0 => Color::Black,
+        1 => ERROR,
+        2 => SUCCESS,
+        3 => ACCENT,
+        4 => INFO,
+        5 => Color::Magenta,
+        6 => Color::Cyan,
+        7 => TEXT,
+        8 => MUTED,
+        9 => Color::LightRed,
+        10 => Color::LightGreen,
+        11 => Color::LightYellow,
+        12 => Color::LightBlue,
+        13 => Color::LightMagenta,
+        14 => Color::LightCyan,
+        15 => Color::White,
+        16..=231 => {
+            let color = code - 16;
+            let red = color / 36;
+            let green = (color % 36) / 6;
+            let blue = color % 6;
+            Color::Rgb(
+                color_cube_value(red),
+                color_cube_value(green),
+                color_cube_value(blue),
+            )
+        }
+        232..=255 => {
+            let value = 8 + (code - 232) * 10;
+            Color::Rgb(value, value, value)
+        }
+    }
+}
+
+fn color_cube_value(value: u8) -> u8 {
+    if value == 0 {
+        0
+    } else {
+        55 + value * 40
+    }
+}
+
+pub fn selected_diff_file_patch(diff: Option<&str>, selected_file: usize) -> Option<String> {
+    let files = parse_diff_files(diff);
+    let file = files.get(selected_file.min(files.len().saturating_sub(1)))?;
+    Some(file.lines.join("\n") + "\n")
 }
 
 fn parse_diff_files(diff: Option<&str>) -> Vec<DiffFileSection<'_>> {
@@ -1466,6 +1692,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Ready",
                     },
@@ -1529,6 +1756,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Ready",
                     },
@@ -1620,6 +1848,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Ready",
                     },
@@ -1692,6 +1921,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Loaded",
                     },
@@ -1738,6 +1968,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Composing",
                     },
@@ -1817,6 +2048,7 @@ mod tests {
             diff_scroll: 0,
             selected_diff_file: 0,
             diff_view_mode: DiffViewMode::Unified,
+            rendered_diff_output: None,
             error: None,
             status: "Ready",
         };
@@ -1855,6 +2087,7 @@ mod tests {
             diff_scroll: 0,
             selected_diff_file: 0,
             diff_view_mode: DiffViewMode::Unified,
+            rendered_diff_output: None,
             error: None,
             status: "Ready",
         };
@@ -1919,6 +2152,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Loaded",
                     },
@@ -1981,6 +2215,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Loaded",
                     },
@@ -2044,6 +2279,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Split,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Loaded",
                     },
@@ -2056,6 +2292,77 @@ mod tests {
         assert!(text.contains("old"));
         assert!(text.contains(" | "));
         assert!(text.contains("new"));
+    }
+
+    #[test]
+    fn renders_pager_diff_output_with_ansi_styles() {
+        let backend = TestBackend::new(120, 48);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let detail = PullRequestDetail {
+            id: 12,
+            title: "Add terminal UI".to_string(),
+            description_raw: "Review in the terminal.".to_string(),
+            state: "OPEN".to_string(),
+            draft: false,
+            author_display_name: "fdg".to_string(),
+            reviewers: Vec::new(),
+            source_branch: "feature/tui".to_string(),
+            destination_branch: "main".to_string(),
+            source_commit_hash: None,
+            destination_commit_hash: None,
+            created_on: String::new(),
+            updated_on: String::new(),
+        };
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::Diff,
+                        pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
+                        selected_pr: 0,
+                        detail: Some(&detail),
+                        comments: &[],
+                        ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
+                        diff: Some(
+                            "diff --git a/src/App.tsx b/src/App.tsx\n@@ -1 +1 @@\n-old\n+new\n",
+                        ),
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::Diff,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
+                        diff_scroll: 0,
+                        selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Split,
+                        rendered_diff_output: Some(
+                            "\u{1b}[31m-old\u{1b}[0m\n\u{1b}[32m+new\u{1b}[0m\n",
+                        ),
+                        error: None,
+                        status: "Loaded",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("-old"));
+        assert!(text.contains("+new"));
+    }
+
+    #[test]
+    fn parses_rgb_ansi_spans() {
+        let spans = ansi_spans("\u{1b}[38;2;1;2;3mnew\u{1b}[0m");
+
+        assert_eq!(spans[0].content.as_ref(), "new");
+        assert_eq!(spans[0].style.fg, Some(Color::Rgb(1, 2, 3)));
     }
 
     #[test]
@@ -2108,6 +2415,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Loaded",
                     },
@@ -2168,6 +2476,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Loaded",
                     },
@@ -2231,6 +2540,7 @@ mod tests {
                         diff_scroll: 0,
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
                         error: None,
                         status: "Loaded",
                     },

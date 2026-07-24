@@ -1,7 +1,13 @@
 mod render;
 mod terminal;
 
-use std::time::Duration;
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    io::Write,
+    process::{Command, Stdio},
+    time::Duration,
+};
 
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
@@ -16,8 +22,9 @@ use crate::services::review::{
     AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
 };
 use render::{
-    detail_view_target, mouse_target, render, DetailView, DiffViewMode, DraftComment, FocusPane,
-    MouseTarget, PrListFilter, TuiState,
+    detail_view_target, diff_content_width_for_area, mouse_target, render,
+    selected_diff_file_patch, DetailView, DiffViewMode, DraftComment, FocusPane, MouseTarget,
+    PrListFilter, TuiState,
 };
 use terminal::TerminalGuard;
 
@@ -32,6 +39,8 @@ pub fn run_from_env() -> Result<(), String> {
 
     loop {
         app.refresh_ai_review_state();
+        let area = terminal.area().map_err(|error| error.to_string())?;
+        app.prepare_rendered_diff(area);
         terminal
             .draw(|frame| render(frame, app.view_state()))
             .map_err(|error| error.to_string())?;
@@ -86,9 +95,18 @@ struct TuiApp {
     diff_scroll: usize,
     selected_diff_file: usize,
     diff_view_mode: DiffViewMode,
+    rendered_diff: Option<RenderedDiffCache>,
     error: Option<String>,
     status: String,
     should_quit: bool,
+}
+
+struct RenderedDiffCache {
+    selected_file: usize,
+    mode: DiffViewMode,
+    width: usize,
+    patch_hash: u64,
+    output: Option<String>,
 }
 
 impl TuiApp {
@@ -134,6 +152,7 @@ impl TuiApp {
             diff_scroll: 0,
             selected_diff_file: 0,
             diff_view_mode: DiffViewMode::Unified,
+            rendered_diff: None,
             error: None,
             status: "Ready".to_string(),
             should_quit: false,
@@ -316,6 +335,7 @@ impl TuiApp {
         self.selected_diff_file = (self.selected_diff_file + 1).min(file_count - 1);
         if self.selected_diff_file != previous {
             self.diff_scroll = 0;
+            self.rendered_diff = None;
             self.status = "Selected next diff file".to_string();
         }
     }
@@ -325,6 +345,7 @@ impl TuiApp {
         self.selected_diff_file = self.selected_diff_file.saturating_sub(1);
         if self.selected_diff_file != previous {
             self.diff_scroll = 0;
+            self.rendered_diff = None;
             self.status = "Selected previous diff file".to_string();
         }
     }
@@ -336,6 +357,7 @@ impl TuiApp {
         self.focus = FocusPane::Diff;
         self.selected_diff_file = index;
         self.diff_scroll = 0;
+        self.rendered_diff = None;
         self.status = "Selected diff file".to_string();
     }
 
@@ -403,6 +425,7 @@ impl TuiApp {
                 self.active_ai_target = None;
                 self.ai_review_state = None;
                 self.ai_review_output = None;
+                self.rendered_diff = None;
                 self.detail_view = DetailView::PullRequest;
                 self.reset_detail_scrolls();
                 self.reset_diff_state();
@@ -488,6 +511,7 @@ impl TuiApp {
                 })
                 .ok();
                 self.selected_diff_file = 0;
+                self.rendered_diff = None;
                 self.detail = Some(detail);
                 self.drafts.clear();
                 self.composer = None;
@@ -507,6 +531,7 @@ impl TuiApp {
                 self.active_ai_target = None;
                 self.ai_review_state = None;
                 self.ai_review_output = None;
+                self.rendered_diff = None;
                 self.detail_view = target_view;
                 self.reset_detail_scrolls();
                 self.error = Some(error);
@@ -723,12 +748,43 @@ impl TuiApp {
     fn reset_diff_state(&mut self) {
         self.diff_scroll = 0;
         self.selected_diff_file = 0;
+        self.rendered_diff = None;
     }
 
     fn toggle_diff_view_mode(&mut self) {
         self.diff_view_mode = self.diff_view_mode.next();
         self.diff_scroll = 0;
+        self.rendered_diff = None;
         self.status = format!("Diff view: {}", self.diff_view_mode.label());
+    }
+
+    fn prepare_rendered_diff(&mut self, area: ratatui::layout::Rect) {
+        if self.detail_view != DetailView::Diff {
+            return;
+        }
+        let width = diff_content_width_for_area(area);
+        let Some(patch) = selected_diff_file_patch(self.diff.as_deref(), self.selected_diff_file)
+        else {
+            self.rendered_diff = None;
+            return;
+        };
+        let patch_hash = stable_hash(patch.as_str());
+        if self.rendered_diff.as_ref().is_some_and(|cache| {
+            cache.selected_file == self.selected_diff_file
+                && cache.mode == self.diff_view_mode
+                && cache.width == width
+                && cache.patch_hash == patch_hash
+        }) {
+            return;
+        }
+
+        self.rendered_diff = Some(RenderedDiffCache {
+            selected_file: self.selected_diff_file,
+            mode: self.diff_view_mode,
+            width,
+            patch_hash,
+            output: render_diff_with_delta(patch.as_str(), width, self.diff_view_mode),
+        });
     }
 
     fn open_diff_view(&mut self) {
@@ -1028,10 +1084,54 @@ impl TuiApp {
             diff_scroll: self.diff_scroll,
             selected_diff_file: self.selected_diff_file,
             diff_view_mode: self.diff_view_mode,
+            rendered_diff_output: self.rendered_diff.as_ref().and_then(|cache| {
+                if cache.selected_file == self.selected_diff_file
+                    && cache.mode == self.diff_view_mode
+                    && cache
+                        .output
+                        .as_deref()
+                        .is_some_and(|output| !output.trim().is_empty())
+                {
+                    cache.output.as_deref()
+                } else {
+                    None
+                }
+            }),
             error: self.error.as_deref(),
             status: self.status.as_str(),
         }
     }
+}
+
+fn stable_hash(value: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn render_diff_with_delta(patch: &str, width: usize, mode: DiffViewMode) -> Option<String> {
+    let mut command = Command::new("delta");
+    command
+        .arg("--dark")
+        .arg("--paging=never")
+        .arg("--line-numbers")
+        .arg("--file-style=bold brightwhite")
+        .arg("--file-decoration-style=brightblack ul")
+        .arg("--width")
+        .arg(width.max(20).to_string());
+    if mode == DiffViewMode::Split {
+        command.arg("--side-by-side");
+    }
+    command.stdin(Stdio::piped()).stdout(Stdio::piped());
+
+    let mut child = command.spawn().ok()?;
+    child.stdin.as_mut()?.write_all(patch.as_bytes()).ok()?;
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let rendered = String::from_utf8_lossy(&output.stdout).to_string();
+    (!rendered.trim().is_empty()).then_some(rendered)
 }
 
 fn build_review_payload(prompt: &str, detail: &PullRequestDetail, diff: &str) -> String {
