@@ -34,6 +34,7 @@ pub struct TuiState<'a> {
     pub ai_review_scroll: usize,
     pub diff_scroll: usize,
     pub selected_diff_file: usize,
+    pub diff_view_mode: DiffViewMode,
     pub error: Option<&'a str>,
     pub status: &'a str,
 }
@@ -56,6 +57,28 @@ pub enum DetailView {
     PullRequest,
     AiReview,
     Diff,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffViewMode {
+    Unified,
+    Split,
+}
+
+impl DiffViewMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Unified => Self::Split,
+            Self::Split => Self::Unified,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unified => "unified",
+            Self::Split => "side-by-side",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -475,9 +498,15 @@ fn render_diff_file(
                 format!("  +{}/-{}", file.additions, file.deletions),
                 muted_style(),
             ),
+            Span::styled(format!("  {}", state.diff_view_mode.label()), muted_style()),
         ]));
         lines.push(Line::from(""));
-        append_diff_file_lines(&mut lines, file, content_width(area));
+        match state.diff_view_mode {
+            DiffViewMode::Unified => append_diff_file_lines(&mut lines, file, content_width(area)),
+            DiffViewMode::Split => {
+                append_split_diff_file_lines(&mut lines, file, content_width(area))
+            }
+        }
     } else {
         lines.push(Line::from(Span::styled(
             "Load a pull request to view its diff.",
@@ -830,6 +859,8 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
         Span::styled(" filter  ", muted_style()),
         Span::styled("g", accent_style()),
         Span::styled(diff_action, muted_style()),
+        Span::styled("u", accent_style()),
+        Span::styled(" unified/split  ", muted_style()),
         Span::styled("v", accent_style()),
         Span::styled(" pane  ", muted_style()),
         Span::styled("y", accent_style()),
@@ -911,6 +942,129 @@ fn append_diff_file_lines(lines: &mut Vec<Line<'_>>, file: &DiffFileSection<'_>,
             lines.push(Line::from(style_diff_line(wrapped.as_str())));
         }
     }
+}
+
+fn append_split_diff_file_lines(
+    lines: &mut Vec<Line<'_>>,
+    file: &DiffFileSection<'_>,
+    width: usize,
+) {
+    let column_width = width.saturating_sub(3).checked_div(2).unwrap_or(0).max(12);
+    let mut index = 0;
+    while index < file.lines.len() {
+        let line = file.lines[index];
+        if is_diff_meta_line(line) || line.starts_with("@@") {
+            for wrapped in wrap_plain_line(line, width) {
+                lines.push(Line::from(style_diff_line(wrapped.as_str())));
+            }
+            index += 1;
+            continue;
+        }
+
+        if line.starts_with('-') && !line.starts_with("---") {
+            let deletion_start = index;
+            while index < file.lines.len()
+                && file.lines[index].starts_with('-')
+                && !file.lines[index].starts_with("---")
+            {
+                index += 1;
+            }
+            let addition_start = index;
+            while index < file.lines.len()
+                && file.lines[index].starts_with('+')
+                && !file.lines[index].starts_with("+++")
+            {
+                index += 1;
+            }
+            let deletion_count = addition_start.saturating_sub(deletion_start);
+            let addition_count = index.saturating_sub(addition_start);
+            for row_index in 0..deletion_count.max(addition_count) {
+                let left = file
+                    .lines
+                    .get(deletion_start + row_index)
+                    .and_then(|line| line.strip_prefix('-'))
+                    .unwrap_or("");
+                let right = file
+                    .lines
+                    .get(addition_start + row_index)
+                    .and_then(|line| line.strip_prefix('+'))
+                    .unwrap_or("");
+                push_split_diff_row(
+                    lines,
+                    left,
+                    error_style(),
+                    right,
+                    success_style(),
+                    column_width,
+                );
+            }
+            continue;
+        }
+
+        if line.starts_with('+') && !line.starts_with("+++") {
+            push_split_diff_row(
+                lines,
+                "",
+                muted_style(),
+                line.strip_prefix('+').unwrap_or(line),
+                success_style(),
+                column_width,
+            );
+            index += 1;
+            continue;
+        }
+
+        let context = line.strip_prefix(' ').unwrap_or(line);
+        push_split_diff_row(
+            lines,
+            context,
+            text_style(),
+            context,
+            text_style(),
+            column_width,
+        );
+        index += 1;
+    }
+}
+
+fn push_split_diff_row<'a>(
+    lines: &mut Vec<Line<'a>>,
+    left: &str,
+    left_style: Style,
+    right: &str,
+    right_style: Style,
+    column_width: usize,
+) {
+    lines.push(Line::from(vec![
+        Span::styled(fit_diff_cell(left, column_width), left_style),
+        Span::styled(" | ", muted_style()),
+        Span::styled(fit_diff_cell(right, column_width), right_style),
+    ]));
+}
+
+fn fit_diff_cell(line: &str, width: usize) -> String {
+    let width = width.max(1);
+    let mut cell: String = line.chars().take(width).collect();
+    if line.chars().count() > width {
+        cell.pop();
+        cell.push('~');
+    }
+    while cell.chars().count() < width {
+        cell.push(' ');
+    }
+    cell
+}
+
+fn is_diff_meta_line(line: &str) -> bool {
+    line.starts_with("diff --git")
+        || line.starts_with("index ")
+        || line.starts_with("---")
+        || line.starts_with("+++")
+        || line.starts_with("new file mode")
+        || line.starts_with("deleted file mode")
+        || line.starts_with("similarity index ")
+        || line.starts_with("rename from ")
+        || line.starts_with("rename to ")
 }
 
 fn parse_diff_files(diff: Option<&str>) -> Vec<DiffFileSection<'_>> {
@@ -1311,6 +1465,7 @@ mod tests {
                         ai_review_scroll: 0,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Ready",
                     },
@@ -1373,6 +1528,7 @@ mod tests {
                         ai_review_scroll: 0,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Ready",
                     },
@@ -1463,6 +1619,7 @@ mod tests {
                         ai_review_scroll: 0,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Ready",
                     },
@@ -1534,6 +1691,7 @@ mod tests {
                         ai_review_scroll: 0,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Loaded",
                     },
@@ -1579,6 +1737,7 @@ mod tests {
                         ai_review_scroll: 0,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Composing",
                     },
@@ -1657,6 +1816,7 @@ mod tests {
             ai_review_scroll: 0,
             diff_scroll: 0,
             selected_diff_file: 0,
+            diff_view_mode: DiffViewMode::Unified,
             error: None,
             status: "Ready",
         };
@@ -1694,6 +1854,7 @@ mod tests {
             ai_review_scroll: 0,
             diff_scroll: 0,
             selected_diff_file: 0,
+            diff_view_mode: DiffViewMode::Unified,
             error: None,
             status: "Ready",
         };
@@ -1757,6 +1918,7 @@ mod tests {
                         ai_review_scroll: 0,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Loaded",
                     },
@@ -1818,6 +1980,7 @@ mod tests {
                         ai_review_scroll: 0,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Loaded",
                     },
@@ -1831,6 +1994,68 @@ mod tests {
         assert!(text.contains("feature/tui -> main"));
         assert!(text.contains("diff --git a/src/App.tsx"));
         assert!(text.contains("+new"));
+    }
+
+    #[test]
+    fn renders_split_pull_request_diff_view() {
+        let backend = TestBackend::new(120, 48);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let detail = PullRequestDetail {
+            id: 12,
+            title: "Add terminal UI".to_string(),
+            description_raw: "Review in the terminal.".to_string(),
+            state: "OPEN".to_string(),
+            draft: false,
+            author_display_name: "fdg".to_string(),
+            reviewers: Vec::new(),
+            source_branch: "feature/tui".to_string(),
+            destination_branch: "main".to_string(),
+            source_commit_hash: None,
+            destination_commit_hash: None,
+            created_on: String::new(),
+            updated_on: String::new(),
+        };
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::Diff,
+                        pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
+                        selected_pr: 0,
+                        detail: Some(&detail),
+                        comments: &[],
+                        ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
+                        diff: Some(
+                            "diff --git a/src/App.tsx b/src/App.tsx\n@@ -1 +1 @@\n-old\n+new\n",
+                        ),
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::Diff,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
+                        diff_scroll: 0,
+                        selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Split,
+                        error: None,
+                        status: "Loaded",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("side-by-side"));
+        assert!(text.contains("old"));
+        assert!(text.contains(" | "));
+        assert!(text.contains("new"));
     }
 
     #[test]
@@ -1882,6 +2107,7 @@ mod tests {
                         ai_review_scroll: 10,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Loaded",
                     },
@@ -1941,6 +2167,7 @@ mod tests {
                         ai_review_scroll: usize::MAX,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Loaded",
                     },
@@ -2003,6 +2230,7 @@ mod tests {
                         ai_review_scroll: usize::MAX,
                         diff_scroll: 0,
                         selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
                         error: None,
                         status: "Loaded",
                     },

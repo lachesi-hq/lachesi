@@ -16,8 +16,8 @@ use crate::services::review::{
     AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
 };
 use render::{
-    detail_view_target, mouse_target, render, DetailView, DraftComment, FocusPane, MouseTarget,
-    PrListFilter, TuiState,
+    detail_view_target, mouse_target, render, DetailView, DiffViewMode, DraftComment, FocusPane,
+    MouseTarget, PrListFilter, TuiState,
 };
 use terminal::TerminalGuard;
 
@@ -85,6 +85,7 @@ struct TuiApp {
     ai_review_scroll: usize,
     diff_scroll: usize,
     selected_diff_file: usize,
+    diff_view_mode: DiffViewMode,
     error: Option<String>,
     status: String,
     should_quit: bool,
@@ -132,6 +133,7 @@ impl TuiApp {
             ai_review_scroll: 0,
             diff_scroll: 0,
             selected_diff_file: 0,
+            diff_view_mode: DiffViewMode::Unified,
             error: None,
             status: "Ready".to_string(),
             should_quit: false,
@@ -153,6 +155,7 @@ impl TuiApp {
             KeyCode::Char('a') => self.start_ai_review(),
             KeyCode::Char('f') => self.cycle_pr_filter(),
             KeyCode::Char('g') => self.open_diff_view(),
+            KeyCode::Char('u') => self.toggle_diff_view_mode(),
             KeyCode::Char('v') => self.toggle_detail_view(),
             KeyCode::Char('y') => self.copy_ai_review_output(),
             KeyCode::Char('r') => self.refresh_active_view(),
@@ -722,6 +725,12 @@ impl TuiApp {
         self.selected_diff_file = 0;
     }
 
+    fn toggle_diff_view_mode(&mut self) {
+        self.diff_view_mode = self.diff_view_mode.next();
+        self.diff_scroll = 0;
+        self.status = format!("Diff view: {}", self.diff_view_mode.label());
+    }
+
     fn open_diff_view(&mut self) {
         if self.detail_view == DetailView::Diff {
             self.detail_view = DetailView::PullRequest;
@@ -1018,6 +1027,7 @@ impl TuiApp {
             ai_review_scroll: self.ai_review_scroll,
             diff_scroll: self.diff_scroll,
             selected_diff_file: self.selected_diff_file,
+            diff_view_mode: self.diff_view_mode,
             error: self.error.as_deref(),
             status: self.status.as_str(),
         }
@@ -1225,6 +1235,21 @@ mod tests {
 
         app.handle_key(KeyCode::Char('k'));
         assert_eq!(app.selected_diff_file, 0);
+    }
+
+    #[test]
+    fn diff_view_mode_toggle_cycles_between_unified_and_split() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.diff_scroll = 12;
+
+        app.handle_key(KeyCode::Char('u'));
+        assert_eq!(app.diff_view_mode, DiffViewMode::Split);
+        assert_eq!(app.diff_scroll, 0);
+        assert_eq!(app.status, "Diff view: side-by-side");
+
+        app.handle_key(KeyCode::Char('u'));
+        assert_eq!(app.diff_view_mode, DiffViewMode::Unified);
+        assert_eq!(app.status, "Diff view: unified");
     }
 
     #[test]
